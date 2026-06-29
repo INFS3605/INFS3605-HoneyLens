@@ -36,14 +36,14 @@
   }
   /* phone frame */
   #phone{
-    width:392px; max-width:100%; height:812px; max-height:94vh;
+    width:min(860px,100%); max-width:100%; height:min(980px,96vh);
     background:radial-gradient(120% 80% at 50% 0%,#23275f 0%,#1a1d4b 46%,#15183c 100%);
-    border-radius:34px; position:relative; overflow:hidden;
-    box-shadow:var(--shadow), 0 0 0 9px #05060f, 0 0 0 11px #1b1d3a;
+    border-radius:20px; position:relative; overflow:hidden;
+    box-shadow:var(--shadow), 0 0 0 5px #05060f, 0 0 0 7px #1b1d3a;
   }
   #screen{position:absolute; inset:0; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch}
   #screen::-webkit-scrollbar{width:0}
-  .pad{padding:22px 18px 26px}
+  .pad{padding:24px 28px 30px}
   .pb{padding-bottom:120px}
 
   /* header */
@@ -287,6 +287,81 @@
     color:#fff;padding:13px 20px;border-radius:12px;font-weight:600;font-size:14px;z-index:60;box-shadow:var(--shadow);
     display:flex;gap:10px;align-items:center;max-width:340px}
   .err{color:var(--red);font-size:13px;margin-top:6px;font-weight:600}
+
+  /* ===== top navigation ===== */
+  .topnav{display:flex;align-items:center;justify-content:space-between;padding:16px 0 18px;
+    border-bottom:1px solid var(--border);margin-bottom:20px}
+  .topnav .logo{font-weight:800;font-size:28px;letter-spacing:1px;line-height:1}
+  .topnav .logo b{color:#fff}
+  .topnav .logo .dots{letter-spacing:3px}
+  .nav-links{display:flex;gap:3px;align-items:center}
+  .navbtn{background:none;border:none;color:var(--dim);font-size:13px;font-weight:700;
+    padding:8px 12px;border-radius:10px;cursor:pointer;font-family:inherit;
+    display:flex;align-items:center;gap:6px;transition:background .12s,color .12s}
+  .navbtn:hover{background:var(--surface);color:#fff}
+  .navbtn.active{background:var(--surface-2);color:#fff}
+  .navbtn.logout{color:var(--red)}
+  .navbtn.logout:hover{background:rgba(240,106,122,.12)}
+
+  /* ===== profile page ===== */
+  .profile-layout{display:grid;grid-template-columns:1fr 1.15fr;gap:22px;margin-top:14px;align-items:start}
+  .profile-left{display:flex;flex-direction:column;align-items:center;text-align:center}
+  .avatar-ring{width:88px;height:88px;border-radius:50%;border:3px solid;
+    display:flex;align-items:center;justify-content:center;background:var(--surface)}
+  .tier-badge-sm{display:inline-block;padding:5px 14px;border-radius:999px;font-size:12px;
+    font-weight:800;margin-top:10px}
+  .profile-name{font-size:21px;font-weight:800;margin-top:12px}
+  .profile-role{color:var(--dim);font-size:14px;margin-top:4px}
+  .profile-email{color:var(--teal-2);font-size:13px;margin-top:4px}
+  .stats-chips{display:flex;gap:10px;margin-top:16px;width:100%}
+  .stat-chip{background:var(--surface);border:1px solid var(--border);border-radius:12px;
+    padding:12px 10px;text-align:center;flex:1}
+  .stat-val{font-size:22px;font-weight:800}
+  .stat-lbl{color:var(--dim);font-size:11px;margin-top:3px}
+  .tier-progress{width:100%;margin-top:16px}
+  .tier-progress-label{display:flex;justify-content:space-between;align-items:center;
+    font-weight:700;font-size:14px;margin-bottom:8px}
+  .tier-track{height:8px;background:rgba(255,255,255,.08);border-radius:999px;overflow:hidden}
+  .tier-fill{height:100%;border-radius:999px;transition:width .8s cubic-bezier(.4,0,.2,1)}
+  .profile-right{display:flex;flex-direction:column;align-items:center}
+  .hc-section-label{font-size:17px;font-weight:800;margin-bottom:14px;text-align:center}
+  .honeycomb-wrap{background:var(--surface);border:1px solid var(--border);border-radius:18px;
+    padding:18px;display:inline-block}
+  .hc-count{text-align:center;color:var(--amber);font-size:13px;font-weight:800;margin-top:10px}
+  .badge-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:4px}
+  .badge-item{background:var(--surface);border:1px solid var(--border);border-radius:14px;
+    padding:14px 8px;text-align:center}
+  .badge-item.locked{opacity:.42}
+  .badge-icon{width:42px;height:42px;border-radius:12px;background:var(--chip);
+    display:flex;align-items:center;justify-content:center;margin:0 auto 8px}
+  .badge-label{font-weight:700;font-size:12px;line-height:1.3}
+  .badge-desc{color:var(--dim);font-size:11px;margin-top:4px;line-height:1.4}
+
+  /* ===== tutorial ===== */
+  .tut-steps{display:flex;flex-direction:column;gap:12px;margin-top:18px}
+  .tut-step{display:flex;align-items:flex-start;gap:16px;background:var(--surface);
+    border:1px solid var(--border);border-radius:16px;padding:18px 16px}
+  .tut-num{width:30px;height:30px;border-radius:50%;background:var(--teal);color:#fff;
+    font-weight:800;font-size:14px;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .tut-ic{flex:0 0 auto;margin-top:2px}
+  .tut-body{flex:1;min-width:0}
+  .tut-title{font-weight:700;font-size:16px;margin-bottom:5px}
+  .tut-desc{color:var(--dim);font-size:14px;line-height:1.55}
+
+  /* ===== honey drop popup ===== */
+  .honey-popup{text-align:center;padding:26px 22px 22px}
+  .honey-drop-anim{height:88px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:4px}
+  .honey-drop-anim svg{animation:dropFall .9s cubic-bezier(.36,.07,.19,.97) forwards;transform-origin:bottom center}
+  @keyframes dropFall{
+    0%{transform:translateY(-68px);opacity:0}
+    50%{opacity:1}
+    78%{transform:translateY(0) scaleY(1)}
+    88%{transform:translateY(-7px) scaleY(.93)}
+    100%{transform:translateY(0) scaleY(1)}
+  }
+  .honey-mini-hc{margin:12px auto;display:flex;justify-content:center}
+  .honey-tier-badge{display:inline-block;padding:8px 22px;border-radius:999px;font-weight:800;font-size:14px;margin-top:6px}
+  .honey-count{font-size:36px;font-weight:800;color:var(--amber);margin:4px 0 2px;line-height:1}
 </style>
 
 <div id="phone">
@@ -311,6 +386,29 @@ const DEVICES = [
 /* the strict pipeline used for steppers + gating */
 const FLOW = ['Registration','Distance','Near','Wheel','Paddle','Dispense'];
 const STEPPER = ['Distance','Wheel','Paddle','Dispense']; // shown on data-entry screens (matches hi-fi)
+
+/* ============================ tiers & badges ============================ */
+const TIERS=[
+  {name:'Bronze',   min:0,   max:9,   color:'#cd7f32',light:'#e8a86c',glow:'rgba(205,127,50,.35)'},
+  {name:'Silver',   min:10,  max:24,  color:'#a8bac8',light:'#d6e4ef',glow:'rgba(168,186,200,.35)'},
+  {name:'Ruby',     min:25,  max:49,  color:'#e0115f',light:'#ff6b9d',glow:'rgba(224,17,95,.35)'},
+  {name:'Gold',     min:50,  max:99,  color:'#f5b945',light:'#fde68a',glow:'rgba(245,185,69,.35)'},
+  {name:'Diamond',  min:100, max:199, color:'#7dd3e8',light:'#c7edf7',glow:'rgba(125,211,232,.35)'},
+  {name:'Sapphire', min:200, max:499, color:'#3b6be0',light:'#7fa8f5',glow:'rgba(59,107,224,.35)'},
+  {name:'Platinum', min:500, max:Infinity,color:'#d4d0e8',light:'#ede8ff',glow:'rgba(212,208,232,.35)'},
+];
+function getTier(n){return TIERS.find(t=>n>=t.min&&n<=t.max)||TIERS[0];}
+
+const BADGES=[
+  {id:'first',   label:'First Light',    desc:'Completed your first client',      unlocked:n=>n>=1},
+  {id:'five',    label:'High Five',      desc:'Helped 5 clients see clearly',     unlocked:n=>n>=5},
+  {id:'silver',  label:'Silver Wings',   desc:'Reached Silver tier (10 clients)', unlocked:n=>n>=10},
+  {id:'quarter', label:'Quarter Way',    desc:'25 clients — Ruby tier reached',   unlocked:n=>n>=25},
+  {id:'gold',    label:'Gold Standard',  desc:'50 clients — Gold tier reached',   unlocked:n=>n>=50},
+  {id:'century', label:'The Century',    desc:'100 clients — Diamond tier',       unlocked:n=>n>=100},
+  {id:'legend',  label:'Legend',         desc:'200 clients — Sapphire tier',      unlocked:n=>n>=200},
+  {id:'plat',    label:'Platinum Bee',   desc:'500 clients — Platinum tier',      unlocked:n=>n>=500},
+];
 
 /* ============================ anonymous id w/ check char ============================ */
 const A2Z='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -430,9 +528,10 @@ const state = {
   role:'Supervisor',
   device:'DISP-01',
   activeId:null,
-  sessions:{},   // id -> session
-  queue:[],      // ordered ids shown on home
-  sync:[],       // finalised ids queued for sync
+  sessions:{},
+  queue:[],
+  sync:[],
+  tester:{name:'Ana Tupou',email:'ana.t@ooxii.org',role:'Eye Tester',camp:'Port Vila Eye Camp',clientsTotal:3},
 };
 
 function seed(){
@@ -585,11 +684,18 @@ function ScreenHome(){
     </div>`;
   }).join('');
 
+  const t=state.tester, tier=getTier(t.clientsTotal);
   screenEl().innerHTML = `<div class="pad pb">
-    ${header()}
-    <div class="camp">
-      <div class="camp-ic">${I('home',26)}</div>
-      <div><h1>Port Vila Eye Camp</h1><p>Vanuatu</p></div>
+    ${navBar('home')}
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px">
+      <div>
+        <div style="font-size:22px;font-weight:800">Welcome, ${t.name}</div>
+        <div style="color:var(--dim);font-size:14px;margin-top:3px">${t.camp}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="tier-badge-sm" style="background:${tier.color};color:${TIERS.indexOf(tier)<1?'#fff':'#1b1d3a'}">${tier.name}</span>
+        <span class="pill"><span class="dot"></span>Online</span>
+      </div>
     </div>
 
     <div class="rolebar">
@@ -917,8 +1023,9 @@ function confirmGlasses(){
   const s=state.sessions[state.activeId];
   s.dispense={glassesDispensed:true,status:'Given',dispensedAt:nowTime()};
   s.status='Finalised'; s.version++;
-  toast('Glasses confirmed for '+s.id);
+  state.tester.clientsTotal++;
   go(ScreenDispense);
+  setTimeout(()=>showHoneyDrop(),250);
 }
 function saveForSync(){
   const s=state.sessions[state.activeId];
@@ -941,8 +1048,7 @@ function ScreenSync(){
       <span class="statpill ${st==='Synced'?'s-ready':st==='Failed'?'s-error':'s-waiting'}"><span class="dot" style="background:${st==='Synced'?'#4ade80':st==='Failed'?'#f06a7a':'#f5b945'}"></span>${st}</span>
     </div>`;}).join('');
   screenEl().innerHTML=`<div class="pad pb">
-    ${header()}
-    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    ${navBar('home')}
     <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync queue</h1><p>${state.sync.length} finalised session${state.sync.length===1?'':'s'} waiting</p></div></div>
     <div class="notice warn" style="margin-top:20px"><span class="x">${I('warn',22,'#f5b945')}</span><div><div class="t">No internet at camp</div><div class="s">Sessions stay safe on this device and upload automatically when internet returns. Testing is never interrupted.</div></div></div>
     <div style="margin-top:8px">${items||'<div class="card" style="padding:22px;text-align:center;color:var(--dim)">Nothing queued yet.</div>'}</div>
@@ -1200,6 +1306,213 @@ function advance(s){
 function scrim(inner){ closeScrim(); const d=document.createElement('div'); d.className='scrim'; d.id='scrim'; d.innerHTML=inner;
   d.addEventListener('click',e=>{ if(e.target===d) closeScrim(); }); document.getElementById('phone').appendChild(d); }
 function closeScrim(){ const d=document.getElementById('scrim'); if(d)d.remove(); }
+
+/* ============================ navigation bar ============================ */
+function navBar(active='home'){
+  const links=[
+    {id:'home',     label:'Home',     icon:'home',   fn:'go(ScreenHome)'},
+    {id:'profile',  label:'Profile',  icon:'person', fn:'go(ScreenProfile)'},
+    {id:'tutorial', label:'Tutorial', icon:'info',   fn:'go(ScreenTutorial)'},
+    {id:'settings', label:'Settings', icon:'device', fn:'go(ScreenSettings)'},
+  ];
+  return `<div class="topnav">
+    <div class="logo"><b>oox</b><span class="dots">ii</span></div>
+    <div class="nav-links">
+      ${links.map(l=>`<button class="navbtn ${active===l.id?'active':''}" onclick="${l.fn}">${I(l.icon,15,active===l.id?'#fff':'#a7add9')} ${l.label}</button>`).join('')}
+      <button class="navbtn logout" onclick="doLogout()">${I('back',15,'#f06a7a')} Logout</button>
+    </div>
+  </div>`;
+}
+function doLogout(){state.authed=false; go(ScreenSignIn);}
+
+/* ============================ PROFILE ============================ */
+function ScreenProfile(){
+  const t=state.tester;
+  const tier=getTier(t.clientsTotal);
+  const tierIdx=TIERS.indexOf(tier);
+  const nextTier=TIERS[tierIdx+1]||null;
+  const progress=nextTier?Math.round(((t.clientsTotal-tier.min)/(nextTier.min-tier.min))*100):100;
+  const cellsFilled=Math.min(t.clientsTotal,18);
+  const unlocked=BADGES.filter(b=>b.unlocked(t.clientsTotal));
+  const locked=BADGES.filter(b=>!b.unlocked(t.clientsTotal));
+  const badgeHTML=(b,lk)=>`<div class="badge-item ${lk?'locked':''}">
+    <div class="badge-icon" style="${lk?'':'background:linear-gradient(135deg,'+tier.color+','+tier.light+')'}">${I(lk?'shield':'check',20,lk?'#4a4f80':'#fff')}</div>
+    <div class="badge-label">${b.label}</div>
+    <div class="badge-desc">${lk?'🔒 Locked':b.desc}</div>
+  </div>`;
+  screenEl().innerHTML=`<div class="pad pb">
+    ${navBar('profile')}
+    <div class="profile-layout">
+      <div class="profile-left">
+        <div class="avatar-ring" style="border-color:${tier.color};box-shadow:0 0 28px ${tier.glow}">
+          ${I('person',42)}
+        </div>
+        <div class="tier-badge-sm" style="background:${tier.color};color:${tierIdx<1?'#fff':'#1b1d3a'}">${tier.name} Tester</div>
+        <div class="profile-name">${t.name}</div>
+        <div class="profile-role">${t.role}</div>
+        <div class="profile-email">${t.email}</div>
+        <div class="stats-chips">
+          <div class="stat-chip">
+            <div class="stat-val" style="color:${tier.color}">${t.clientsTotal}</div>
+            <div class="stat-lbl">Clients</div>
+          </div>
+          <div class="stat-chip">
+            <div class="stat-val">${unlocked.length}</div>
+            <div class="stat-lbl">Badges</div>
+          </div>
+          <div class="stat-chip">
+            <div class="stat-val">${tierIdx+1}</div>
+            <div class="stat-lbl">Tier</div>
+          </div>
+        </div>
+        ${nextTier?`<div class="tier-progress">
+          <div class="tier-progress-label">
+            <span style="color:${tier.color};font-weight:800">${tier.name}</span>
+            <span style="color:var(--dim);font-size:12px">${nextTier.min-t.clientsTotal} to ${nextTier.name}</span>
+          </div>
+          <div class="tier-track"><div class="tier-fill" style="width:${progress}%;background:${tier.color}"></div></div>
+        </div>`:`<div style="margin-top:14px;color:var(--amber);font-weight:700">🏆 Maximum tier!</div>`}
+      </div>
+      <div class="profile-right">
+        <div class="hc-section-label">Honey earned</div>
+        <div class="honeycomb-wrap">
+          ${honeycombSVG(cellsFilled,false)}
+          <div class="hc-count">${cellsFilled} / 18 cells filled</div>
+        </div>
+        <div style="margin-top:14px;color:var(--dim);font-size:13px;text-align:center;max-width:200px;line-height:1.5">
+          Each client you complete fills a cell with honey. Keep going!
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:26px">
+      <div class="sec"><h2>Achievements</h2><span class="meta">${unlocked.length} / ${BADGES.length} earned</span></div>
+      <div class="badge-grid">
+        ${[...unlocked.map(b=>badgeHTML(b,false)),...locked.map(b=>badgeHTML(b,true))].join('')}
+      </div>
+    </div>
+    ${privacy()}
+  </div>`;
+}
+
+/* ============================ TUTORIAL ============================ */
+function ScreenTutorial(){
+  const steps=[
+    {icon:'clipboard',title:'Register the client',desc:'Generate an anonymous ID. Enter age band, gender, village, and cataract history. No names or personal data are collected.'},
+    {icon:'glasses',title:'Distance vision test',desc:'Test each eye separately with the Snellen chart. Cover one eye at a time with the palm. Record the smallest line read fully correctly.'},
+    {icon:'wheel',title:'Wheel test (if needed)',desc:'If vision is worse than 6/12 in either eye, use the wheel to find the correct lens. Measure pupillary distance (PD) first.'},
+    {icon:'glasses',title:'Near vision test',desc:'Test both eyes together at near distance. Record the smallest near line read correctly. This step is done at the Distance station.'},
+    {icon:'paddle',title:'Paddle test (if needed)',desc:'Find the preferred reading power. Client looks through the wheel lenses at the near vision card while you hold the paddle.'},
+    {icon:'lens',title:'Dispense glasses',desc:'Review the prescription summary. Confirm the glasses are given. Save the session — it will sync automatically when internet returns.'},
+  ];
+  screenEl().innerHTML=`<div class="pad pb">
+    ${navBar('tutorial')}
+    <div class="camp">
+      <div class="camp-ic">${I('eye',26)}</div>
+      <div><h1>How to use OOXii</h1><p>Step-by-step testing guide</p></div>
+    </div>
+    <div class="tut-steps">
+      ${steps.map((s,i)=>`<div class="tut-step">
+        <div class="tut-num">${i+1}</div>
+        <div class="tut-ic">${I(s.icon,22,'#1cc3d6')}</div>
+        <div class="tut-body"><div class="tut-title">${s.title}</div><div class="tut-desc">${s.desc}</div></div>
+      </div>`).join('')}
+    </div>
+    <div class="notice warn" style="margin-top:20px">
+      <span class="x">${I('info',22,'#f5b945')}</span>
+      <div><div class="t">Prototype only</div>
+      <div class="s">Clinical mappings (Snellen, lens logic) are placeholder values for demo use — not validated OOXii production values.</div></div>
+    </div>
+    ${privacy()}
+  </div>`;
+}
+
+/* ============================ SETTINGS ============================ */
+function ScreenSettings(){
+  const roleBtns=['Supervisor','Registration','Distance','Wheel','Paddle','Dispense'].map(r=>
+    `<button class="roletag ${state.role===r?'on':''}" onclick="setRoleFromSettings('${r}')">${r}</button>`).join('');
+  const settRow=(icon,label,val)=>`<div class="sumrow">
+    <div class="ic" style="background:var(--chip);width:40px;height:40px">${I(icon,20)}</div>
+    <div class="txt"><div class="a">${label}</div></div>
+    <div class="val"><div class="a" style="color:var(--dim);font-size:14px">${val}</div></div></div>`;
+  screenEl().innerHTML=`<div class="pad pb">
+    ${navBar('settings')}
+    <div class="camp">
+      <div class="camp-ic">${I('device',26)}</div>
+      <div><h1>Settings</h1><p>Device and camp configuration</p></div>
+    </div>
+    <div class="sec"><h2>Device role</h2></div>
+    <div class="card" style="padding:16px 18px">
+      <div class="rolebar">${roleBtns}</div>
+      <div style="color:var(--dim);font-size:13px;margin-top:10px">Controls which clients and steps this device can access.</div>
+    </div>
+    <div class="sec"><h2>Camp info</h2></div>
+    <div class="card sumcard">
+      ${settRow('home','Camp name','Port Vila Eye Camp')}
+      ${settRow('home','Location','Vanuatu')}
+      ${settRow('device','Device ID',state.device)}
+      ${settRow('cloud','Sync queue',state.sync.length+' sessions queued')}
+    </div>
+    <div class="sec"><h2>Offline &amp; privacy</h2></div>
+    <div class="notice" style="background:rgba(74,222,128,.06);border-color:rgba(74,222,128,.28)">
+      <span class="x">${I('shield',22,'#4ade80')}</span>
+      <div><div class="t" style="color:var(--green)">All data stays on this device</div>
+      <div class="s">No personal data collected. Anonymous IDs only. Fully offline for 30 days after sign-in.</div></div>
+    </div>
+    <div class="hint" style="margin-top:20px">OOXii Offline Eye Camp · Prototype v0.1<br>Not for production clinical use.</div>
+  </div>`;
+}
+function setRoleFromSettings(r){state.role=r; go(ScreenSettings);}
+
+/* ============================ HONEY DROP POPUP ============================ */
+function showHoneyDrop(){
+  const t=state.tester;
+  const tier=getTier(t.clientsTotal);
+  const tierIdx=TIERS.indexOf(tier);
+  const nextTier=TIERS[tierIdx+1]||null;
+  const progress=nextTier?Math.round(((t.clientsTotal-tier.min)/(nextTier.min-tier.min))*100):100;
+  const prevTier=getTier(t.clientsTotal-1);
+  const tierUp=prevTier.name!==tier.name;
+  scrim(`<div class="modal honey-popup">
+    <div class="honey-drop-anim">
+      <svg width="40" height="54" viewBox="0 0 40 54">
+        <defs><radialGradient id="dg" cx="38%" cy="28%">
+          <stop offset="0%" stop-color="#fde68a"/>
+          <stop offset="100%" stop-color="#d97706"/>
+        </radialGradient></defs>
+        <path d="M20 3C20 3 4 21 4 35c0 10.5 7.2 16 16 16s16-5.5 16-16C36 21 20 3 20 3Z" fill="url(#dg)"/>
+      </svg>
+    </div>
+    ${tierUp?`<div style="font-size:12px;font-weight:800;color:${tier.color};letter-spacing:1px;text-transform:uppercase;margin-bottom:4px">✦ New tier unlocked!</div>`:''}
+    <div style="font-size:20px;font-weight:800;margin:4px 0">Sweet work!</div>
+    <div style="color:var(--dim);font-size:14px;margin-bottom:12px">Another client helped to see clearly</div>
+    <div class="honey-count">${t.clientsTotal}</div>
+    <div style="color:var(--dim);font-size:12px;margin-bottom:12px">total clients</div>
+    <div class="honey-mini-hc">${honeycombSVG(Math.min(t.clientsTotal,18),true)}</div>
+    <div class="honey-tier-badge" style="background:${tier.color};color:${tierIdx<1?'#fff':'#1a1a2e'}">${tier.name} Tester</div>
+    ${nextTier?`<div style="margin:12px 0 6px;font-size:12px;color:var(--dim)">${nextTier.min-t.clientsTotal} more to reach <b style="color:${nextTier.color}">${nextTier.name}</b></div>
+    <div class="tier-track" style="width:100%"><div class="tier-fill" style="width:${progress}%;background:${tier.color}"></div></div>`:''}
+    <button class="btn btn-primary" style="margin-top:18px" onclick="closeScrim()">Continue ${I('arrowR',18)}</button>
+  </div>`);
+}
+
+/* ============================ HONEYCOMB SVG ============================ */
+function honeycombSVG(filled,mini=false){
+  const R=mini?13:19;
+  const W=R*Math.sqrt(3), H=R*2;
+  const cells=[];
+  for(let row=0;row<4;row++){
+    const even=row%2===0, cols=even?5:4, ox=even?0:W/2;
+    for(let col=0;col<cols;col++) cells.push({cx:ox+col*W+W/2+5,cy:row*(H*.75)+R+5});
+  }
+  const svgW=Math.ceil(5*W+10), svgH=Math.ceil(3*(H*.75)+H+10);
+  const gid=mini?'hgm':'hgf';
+  const pts=(cx,cy,r)=>Array.from({length:6},(_,i)=>{const a=(60*i-30)*Math.PI/180;return`${(cx+r*Math.cos(a)).toFixed(1)},${(cy+r*Math.sin(a)).toFixed(1)}`;}).join(' ');
+  const hexes=cells.map(({cx,cy},i)=>{
+    const f=i<filled;
+    return `<polygon points="${pts(cx,cy,R-1.5)}" fill="${f?`url(#${gid})`:'rgba(255,255,255,0.05)'}" stroke="${f?'#c8860a':'rgba(255,255,255,0.12)'}" stroke-width="1.2"/>`;
+  }).join('');
+  return `<svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}" style="display:block;margin:0 auto"><defs><radialGradient id="${gid}" cx="35%" cy="30%"><stop offset="0%" stop-color="#fde68a"/><stop offset="100%" stop-color="#d97706"/></radialGradient></defs>${hexes}</svg>`;
+}
 
 /* ============================ boot ============================ */
 ScreenSignIn();
