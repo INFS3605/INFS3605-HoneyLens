@@ -1,0 +1,1206 @@
+<!--
+  OOXii Offline Eye Camp App — functional prototype
+  Visual reference: the three supplied hi-fi screens (Home / Station data entry / Dispense).
+  Implements: tester sign-in, camp home + handover queue, anonymous client intake with
+  check-character IDs, distance/near/wheel/paddle data entry with automated Snellen results,
+  station-gating decision engine, QR handover (real QR encoding via CDN with text fallback),
+  dispense + sync queue. All data is in-memory; nothing leaves the browser.
+
+  NOTE: clinical mappings (Snellen, lens recommendation) are plausible prototype logic for a
+  walkable demo, not validated OOXii production values.
+-->
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>OOXii — Offline Eye Camp</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<style>
+  :root{
+    --bg-0:#15183c; --bg-1:#1e2157; --bg-2:#262a66;
+    --surface:rgba(118,128,205,.12); --surface-2:rgba(120,131,210,.20);
+    --border:rgba(154,164,228,.16); --border-2:rgba(154,164,228,.28);
+    --teal:#14a8c5; --teal-2:#1cc3d6; --teal-deep:#0e83a0;
+    --text:#ffffff; --dim:#a7add9; --dimmer:#7c83b4;
+    --green:#4ade80; --green-bg:rgba(74,222,128,.12);
+    --blue:#4d8bf5; --amber:#f5b945; --red:#f06a7a;
+    --chip:rgba(96,104,190,.42); --paddle:#7d56c9;
+    --shadow:0 14px 40px rgba(0,0,0,.45);
+    --r:16px;
+    font-synthesis:none;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%}
+  body{
+    font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    background:#0c0e24; color:var(--text);
+    display:flex; align-items:center; justify-content:center; min-height:100vh; padding:18px;
+  }
+  /* phone frame */
+  #phone{
+    width:392px; max-width:100%; height:812px; max-height:94vh;
+    background:radial-gradient(120% 80% at 50% 0%,#23275f 0%,#1a1d4b 46%,#15183c 100%);
+    border-radius:34px; position:relative; overflow:hidden;
+    box-shadow:var(--shadow), 0 0 0 9px #05060f, 0 0 0 11px #1b1d3a;
+  }
+  #screen{position:absolute; inset:0; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch}
+  #screen::-webkit-scrollbar{width:0}
+  .pad{padding:22px 18px 26px}
+  .pb{padding-bottom:120px}
+
+  /* header */
+  .topbar{display:flex; align-items:flex-start; justify-content:space-between; gap:10px}
+  .logo{font-weight:800; font-size:30px; letter-spacing:1px; line-height:1}
+  .logo b{color:#fff}
+  .logo .dots{letter-spacing:3px}
+  .offline-wrap{text-align:right}
+  .pill{display:inline-flex; align-items:center; gap:7px; border:1px solid var(--border-2);
+    border-radius:999px; padding:7px 13px; font-size:13px; font-weight:600; color:var(--teal-2)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+  .offline-sub{font-size:13px; color:var(--dim); margin-top:6px}
+  .client-sub{font-size:14px; color:var(--dim); margin-top:8px; font-weight:600}
+
+  /* camp banner */
+  .camp{display:flex; gap:14px; align-items:center; margin-top:22px}
+  .camp-ic{width:56px;height:56px;border-radius:50%;background:linear-gradient(160deg,#16a7c4,#1184a0);
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .camp h1{margin:0; font-size:25px; font-weight:800}
+  .camp p{margin:3px 0 0; color:var(--dim); font-size:15px}
+
+  /* action cards */
+  .actions{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:20px}
+  .action{
+    background:linear-gradient(160deg,var(--teal) 0%,var(--teal-deep) 100%);
+    border:none; border-radius:18px; padding:20px 14px; color:#fff; text-align:center;
+    cursor:pointer; min-height:150px; display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:10px; transition:transform .12s, filter .12s;
+  }
+  .action:active{transform:scale(.97)}
+  .action[disabled]{opacity:.4; filter:grayscale(.3); cursor:not-allowed}
+  .action .t{font-weight:800; font-size:17px}
+  .action .s{font-size:13px; opacity:.92}
+
+  /* section titles */
+  .sec{display:flex; align-items:center; justify-content:space-between; margin:26px 2px 12px}
+  .sec h2{margin:0; font-size:20px; font-weight:800}
+  .sec .meta{color:var(--teal-2); font-size:14px; font-weight:600; display:flex; align-items:center; gap:7px}
+
+  /* rows / cards */
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:var(--r)}
+  .row{display:flex; align-items:center; gap:13px; padding:13px 15px; cursor:pointer;
+    background:var(--surface); border:1px solid var(--border); border-radius:14px; margin-bottom:10px}
+  .row:active{background:var(--surface-2)}
+  .ic{width:46px;height:46px;border-radius:50%;flex:0 0 auto;display:flex;align-items:center;justify-content:center}
+  .ic.sq{border-radius:13px}
+  .grow{flex:1; min-width:0}
+  .row .name{font-weight:700; font-size:17px}
+  .row .sub{color:var(--dim); font-size:13px; margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .chev{color:var(--dimmer); font-size:20px; flex:0 0 auto}
+
+  .statpill{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:6px 12px;
+    font-size:13px;font-weight:700;border:1px solid transparent; white-space:nowrap}
+  .s-ready{color:var(--green);border-color:rgba(74,222,128,.4);background:rgba(74,222,128,.07)}
+  .s-working{color:var(--blue);border-color:rgba(77,139,245,.4);background:rgba(77,139,245,.08)}
+  .s-needs{color:var(--amber);border-color:rgba(245,185,69,.4);background:rgba(245,185,69,.08)}
+  .s-offline{color:var(--dimmer);border-color:var(--border-2)}
+  .s-error,.s-blocked,.s-conflict{color:var(--red);border-color:rgba(240,106,122,.4);background:rgba(240,106,122,.08)}
+  .s-received{color:var(--blue);border-color:rgba(77,139,245,.4);background:rgba(77,139,245,.08)}
+  .s-waiting{color:var(--amber);border-color:rgba(245,185,69,.4)}
+  .time{color:var(--dim);font-size:13px;white-space:nowrap}
+
+  /* footer privacy */
+  .privacy{display:flex; gap:13px; align-items:center; margin-top:26px; color:var(--dim); font-size:13.5px; line-height:1.45}
+  .privacy .shield{width:42px;height:42px;border-radius:50%;background:var(--surface);
+    border:1px solid var(--border);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .info-btn{margin-left:auto;width:34px;height:34px;border-radius:50%;border:1px solid var(--teal);
+    color:var(--teal-2);background:none;display:flex;align-items:center;justify-content:center;cursor:pointer;font-style:italic;font-weight:700;flex:0 0 auto}
+
+  /* stepper */
+  .stepper{display:flex; align-items:flex-start; justify-content:space-between; margin:6px 6px 8px; position:relative}
+  .step{display:flex;flex-direction:column;align-items:center;gap:9px;flex:1;position:relative;z-index:2}
+  .step .circ{width:54px;height:54px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+    border:2px solid var(--border-2); color:var(--dimmer); background:var(--bg-1)}
+  .step.done .circ{background:var(--teal);border-color:var(--teal);color:#fff}
+  .step.current .circ{background:var(--teal);border-color:var(--teal-2);color:#fff;
+    box-shadow:0 0 0 5px rgba(28,195,214,.18), 0 0 18px rgba(28,195,214,.5)}
+  .step .lbl{font-size:14px;font-weight:700;color:var(--text)}
+  .step.locked .lbl{color:var(--dimmer)}
+  .step.locked .circ{opacity:.7}
+  .stepline{position:absolute;top:27px;height:2px;background:var(--teal);z-index:1}
+  .stepline.muted{background:repeating-linear-gradient(90deg,var(--dimmer) 0 5px,transparent 5px 11px);opacity:.6}
+
+  /* offline save banner */
+  .savebanner{display:flex;gap:14px;align-items:center;background:linear-gradient(120deg,rgba(20,168,197,.16),rgba(20,168,197,.04));
+    border:1px solid rgba(28,195,214,.25);border-radius:14px;padding:15px 16px;margin:18px 0}
+  .savebanner .t{font-weight:700;font-size:16px}
+  .savebanner .s{color:var(--dim);font-size:13px;margin-top:2px}
+
+  /* form rows */
+  .frow{display:flex;align-items:center;gap:13px;background:var(--surface);border:1px solid var(--border);
+    border-radius:14px;padding:13px 14px;margin-bottom:11px;min-height:64px}
+  .frow .fic{width:44px;height:44px;border-radius:12px;background:var(--chip);display:flex;
+    align-items:center;justify-content:center;flex:0 0 auto;font-weight:800}
+  .frow .flabel{flex:1;min-width:0}
+  .frow .flabel .l{font-weight:700;font-size:16px}
+  .frow .flabel .h{color:var(--dim);font-size:12.5px;margin-top:2px}
+  .frow .fctl{flex:0 0 auto;display:flex;gap:8px;align-items:center}
+
+  select,input[type=text],input[type=number],input[type=email],input[type=password]{
+    background:rgba(10,12,40,.5);border:1px solid var(--border-2);color:#fff;border-radius:11px;
+    padding:11px 13px;font-size:15px;font-family:inherit;min-width:0;outline:none;font-weight:600}
+  select{appearance:none;-webkit-appearance:none;padding-right:34px;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%23a7add9' stroke-width='2.4'><path d='M6 9l6 6 6-6'/></svg>");
+    background-repeat:no-repeat;background-position:right 12px center;cursor:pointer}
+  input::placeholder{color:var(--dimmer)}
+  select:focus,input:focus{border-color:var(--teal-2)}
+  .full{width:100%}
+
+  /* segmented */
+  .seg{display:inline-flex;background:rgba(10,12,40,.5);border:1px solid var(--border-2);border-radius:11px;overflow:hidden}
+  .seg button{background:none;border:none;color:var(--dim);font-weight:700;font-size:15px;padding:11px 20px;cursor:pointer;font-family:inherit}
+  .seg button.on{background:var(--teal);color:#fff}
+
+  /* eye dropdown pill (R/L) */
+  .eyectl{display:flex;align-items:center;gap:8px;background:rgba(10,12,40,.5);border:1px solid var(--border-2);
+    border-radius:11px;padding:5px 6px 5px 5px}
+  .eyebadge{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:13px}
+  .eye-r{background:#0d1640;color:#fff;border:2px solid var(--blue)}
+  .eye-l{background:#fff;color:#1b1d3a}
+  .eyectl select{border:none;background:transparent;padding:4px 26px 4px 2px;font-size:14px;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%23a7add9' stroke-width='2.4'><path d='M6 9l6 6 6-6'/></svg>");
+    background-position:right 6px center}
+
+  .readout{background:rgba(28,195,214,.1);border:1px dashed rgba(28,195,214,.45);color:var(--teal-2);
+    border-radius:11px;padding:11px 13px;font-weight:800;font-size:15px;text-align:center;min-width:96px}
+
+  /* stacked vision-test field (roomy, touch-friendly, language-light) */
+  .vfield{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:11px}
+  .vhead{display:flex;align-items:center;gap:12px;margin-bottom:13px}
+  .vhead .fic{width:44px;height:44px;border-radius:12px;background:var(--chip);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .vhead .l{font-weight:700;font-size:16.5px;flex:1;line-height:1.25}
+  .vctl select.full{width:100%;padding:14px 38px 14px 15px;font-size:16px}
+  .seg.full{display:flex;width:100%}
+  .seg.full button{flex:1;padding:15px 0;font-size:16px}
+  .bothchip{font-size:12px;font-weight:700;color:var(--dim);border:1px solid var(--border-2);border-radius:999px;padding:6px 12px;white-space:nowrap}
+
+  /* illustrated instruction card (OOXii flat-illustration style) */
+  .instruction{border-radius:16px;padding:16px 16px 14px;margin:18px 0 14px;
+    background:linear-gradient(120deg,rgba(20,168,197,.10),rgba(20,168,197,.02));border:1px solid rgba(28,195,214,.22)}
+  .instr-t{font-weight:800;font-size:17px}
+  .instr-s{color:var(--dim);font-size:13.5px;margin-top:3px;line-height:1.45}
+  .illo-frame{margin:14px auto 2px;width:172px;height:172px;border-radius:20px;background:rgba(120,131,210,.16);
+    border:1px solid var(--border);display:flex;align-items:center;justify-content:center}
+  .illo-frame svg{border-radius:14px;display:block}
+
+  /* automatic result bar */
+  .resultbar{display:flex;align-items:center;justify-content:space-between;gap:12px;
+    background:rgba(28,195,214,.07);border:1px dashed rgba(28,195,214,.32);border-radius:12px;padding:11px 14px;margin:0 0 16px}
+  .resultbar .lab{font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:7px}
+  .resultbar .sub{color:var(--dim);font-size:12px;margin-top:3px;display:block}
+
+  /* buttons */
+  .btn{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;border-radius:14px;
+    padding:18px;font-size:18px;font-weight:800;cursor:pointer;border:none;font-family:inherit}
+  .btn-primary{background:linear-gradient(120deg,var(--teal-2),var(--teal-deep));color:#fff}
+  .btn-primary:disabled{opacity:.42;cursor:not-allowed}
+  .btn-secondary{background:transparent;border:1px solid var(--border-2);color:#fff;margin-top:12px}
+  .btn:active:not(:disabled){transform:scale(.99)}
+  .btn-row{position:sticky;bottom:0;padding:16px 18px calc(16px + env(safe-area-inset-bottom));
+    background:linear-gradient(180deg,transparent,var(--bg-0) 38%)}
+
+  /* back */
+  .back{display:inline-flex;align-items:center;gap:8px;background:none;border:none;color:var(--dim);
+    font-size:15px;font-weight:600;cursor:pointer;margin-bottom:6px;padding:6px 0;font-family:inherit}
+
+  /* status block (dispense) */
+  .statusblock{display:flex;gap:14px;align-items:flex-start;margin:8px 0 18px}
+  .statusblock .ok{width:54px;height:54px;border-radius:50%;background:rgba(74,222,128,.14);
+    border:1px solid rgba(74,222,128,.4);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .statusblock h2{margin:0;font-size:23px}
+  .statusblock p{margin:5px 0 0;color:var(--dim);font-size:14.5px}
+
+  /* summary card rows */
+  .sumcard{padding:6px 16px}
+  .sumrow{display:flex;align-items:center;gap:13px;padding:15px 0;border-bottom:1px solid var(--border)}
+  .sumrow:last-child{border-bottom:none}
+  .sumrow .txt{flex:1}
+  .sumrow .txt .a{font-weight:700;font-size:16px}
+  .sumrow .txt .b{color:var(--dim);font-size:13px;margin-top:2px}
+  .sumrow .val{text-align:right}
+  .sumrow .val .a{font-weight:700;font-size:15px}
+  .sumrow .val .b{font-size:15px;margin-top:2px}
+
+  /* prescription card */
+  .rx{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:18px 16px}
+  .rx h4{margin:0 0 12px;display:flex;align-items:center;gap:9px;font-size:16px}
+  .rx h4 .marker{width:14px;height:14px;border-radius:50%}
+  .m-r{background:var(--blue);box-shadow:0 0 8px rgba(77,139,245,.6)}
+  .m-l{background:#fff}
+  .rxgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .ctxgrid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .rxcell{border:1px solid var(--border-2);border-radius:10px;padding:9px 11px;font-size:14px}
+  .rxcell .k{color:var(--dim);font-size:11px;font-weight:700;letter-spacing:.4px}
+  .rxcell .v{font-weight:700;margin-top:1px}
+  .selected-lens{margin-top:12px}
+  .selected-lens .k{color:var(--dim);font-size:12px;margin-bottom:6px}
+  .lens-r{background:rgba(77,139,245,.9);border-radius:9px;padding:10px 12px;font-weight:700;font-size:13px}
+  .lens-l{background:#fff;color:#1b1d3a;border-radius:9px;padding:10px 12px;font-weight:700;font-size:13px}
+
+  /* transfer / qr card */
+  .qrcard{display:flex;gap:15px;align-items:center;padding:18px 16px;margin-top:14px;cursor:pointer}
+  .qrcard .t{font-weight:800;font-size:17px}
+  .qrcard .s{color:var(--dim);font-size:13px;margin-top:3px;line-height:1.4}
+
+  /* modal */
+  .scrim{position:absolute;inset:0;background:rgba(6,7,20,.72);display:flex;align-items:center;justify-content:center;
+    padding:20px;z-index:40;backdrop-filter:blur(3px)}
+  .modal{background:linear-gradient(160deg,#252a66,#1b1e4d);border:1px solid var(--border-2);border-radius:22px;
+    width:100%;max-width:330px;padding:24px 20px;text-align:center;box-shadow:var(--shadow)}
+  .modal h3{margin:0 0 4px;font-size:21px}
+  .modal p{color:var(--dim);font-size:14px;margin:6px 0 16px;line-height:1.5}
+  .qrbox{background:#fff;border-radius:16px;padding:16px;display:inline-block;margin:6px auto 14px}
+  .qrbox img,.qrbox canvas{display:block;border-radius:6px}
+  .qr-fallback{font-family:ui-monospace,Menlo,monospace;font-size:9px;color:#1b1d3a;background:#fff;
+    border-radius:12px;padding:14px;word-break:break-all;text-align:left;max-height:150px;overflow:auto}
+  .modal .id-big{font-size:30px;font-weight:800;letter-spacing:2px;color:var(--teal-2);margin:2px 0 4px}
+
+  /* blocking notice */
+  .notice{display:flex;gap:13px;align-items:flex-start;border-radius:14px;padding:15px;margin:14px 0;
+    background:rgba(240,106,122,.08);border:1px solid rgba(240,106,122,.35)}
+  .notice.warn{background:rgba(245,185,69,.08);border-color:rgba(245,185,69,.4)}
+  .notice .x{flex:0 0 auto;margin-top:1px}
+  .notice .t{font-weight:700;font-size:15px}
+  .notice .s{color:var(--dim);font-size:13.5px;margin-top:3px;line-height:1.45}
+
+  /* role switcher */
+  .rolebar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 2px}
+  .rolebar .lbl{color:var(--dim);font-size:12.5px;font-weight:600;margin-right:2px}
+  .roletag{font-size:12.5px;font-weight:700;border:1px solid var(--border-2);color:var(--dim);
+    background:none;border-radius:999px;padding:6px 11px;cursor:pointer;font-family:inherit}
+  .roletag.on{background:var(--teal);border-color:var(--teal);color:#fff}
+
+  .hint{color:var(--dimmer);font-size:12.5px;text-align:center;margin-top:16px;line-height:1.5}
+  .signin-field{margin-bottom:14px}
+  .signin-field label{display:block;color:var(--dim);font-size:13px;font-weight:600;margin-bottom:7px}
+  .checkrow{display:flex;align-items:center;gap:10px;color:var(--dim);font-size:14px;margin:4px 0 22px;cursor:pointer}
+  .checkbox{width:22px;height:22px;border-radius:6px;border:1.5px solid var(--border-2);display:flex;align-items:center;justify-content:center}
+  .checkbox.on{background:var(--teal);border-color:var(--teal)}
+  .toast{position:absolute;left:50%;bottom:26px;transform:translateX(-50%);background:#0c2630;border:1px solid var(--teal);
+    color:#fff;padding:13px 20px;border-radius:12px;font-weight:600;font-size:14px;z-index:60;box-shadow:var(--shadow);
+    display:flex;gap:10px;align-items:center;max-width:340px}
+  .err{color:var(--red);font-size:13px;margin-top:6px;font-weight:600}
+</style>
+
+<div id="phone">
+  <div id="screen"></div>
+</div>
+
+<script>
+/* ============================ camp configuration ============================ */
+const SNELLEN = {1:'6/60',2:'6/48',3:'6/36',4:'6/24',5:'6/18',6:'6/12',7:'6/9',8:'6/7.5',9:'6/6',10:'6/5',11:'6/4'};
+const LINE_OPTS = Object.keys(SNELLEN).map(Number);                 // 1..11
+const PADDLE_POWERS = ['+0.75','+1.00','+1.25','+1.50','+1.75','+2.00','+2.25','+2.50','+3.00'];
+const LENS_POWERS = (()=>{const a=[];for(let v=-6;v<=6;v+=0.25)a.push((v>=0?'+':'')+v.toFixed(2));return a;})();
+const VILLAGES = ['Port Vila','Mele','Pango','Lelepa','Erakor','Ifira','Eratap','Other (camp area)'];
+const AGE_BANDS = ['0–9','10–19','20–34','35–44','45–54','55–64','65+'];
+const DEVICES = [
+  {role:'Registration', id:'REG-01',    status:'ready',   ic:'clipboard', col:'#6a5fd0'},
+  {role:'Distance',     id:'DIST-02',   status:'ready',   ic:'glasses',   col:'#2f8fb3'},
+  {role:'Wheel',        id:'WHEEL-01',  status:'ready',   ic:'wheel',     col:'#4a4fb0'},
+  {role:'Paddle',       id:'PADDLE-01', status:'ready',   ic:'paddle',    col:'#7a52c0'},
+  {role:'Dispense',     id:'DISP-01',   status:'working', ic:'glasses',   col:'#27a98a'},
+];
+/* the strict pipeline used for steppers + gating */
+const FLOW = ['Registration','Distance','Near','Wheel','Paddle','Dispense'];
+const STEPPER = ['Distance','Wheel','Paddle','Dispense']; // shown on data-entry screens (matches hi-fi)
+
+/* ============================ anonymous id w/ check char ============================ */
+const A2Z='ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+function checkChar(letter,digits){
+  const sum = A2Z.indexOf(letter)*7 + parseInt(digits,10)*3;
+  return A2Z[(sum % 23)]; // deterministic 1-char check
+}
+function newAnonId(){
+  const letter = A2Z[Math.floor(Math.random()*26)];
+  const digits = String(Math.floor(Math.random()*100)).padStart(2,'0');
+  return `${letter}${digits}-${checkChar(letter,digits)}`;
+}
+function validId(id){
+  const m=/^([A-Z])(\d{2})-([A-Z])$/.exec(id||'');
+  return !!m && checkChar(m[1],m[2])===m[3];
+}
+
+/* ============================ snellen calculator ============================ */
+// tester picks smallest fully-correct line + letters on next line -> read-only result
+function snellen(line, lettersNext){
+  if(!line) return '—';
+  let s = SNELLEN[line];
+  if(lettersNext>0 && line<11) s += ` +${lettersNext}`;
+  return s;
+}
+
+/* steps are not all stations: Near vision is performed at the Distance station */
+const STEP_STATION = {Registration:'Registration', Distance:'Distance', Near:'Distance', Wheel:'Wheel', Paddle:'Paddle', Dispense:'Dispense'};
+
+/* ============================ decision engine ============================ */
+const DE = {
+  isIntakeComplete: s => !!(s.intake && s.intake.ageBand && s.intake.gender && s.intake.village && s.intake.cataract && s.intake.sessionType),
+  isDistanceComplete: s => !!(s.distance && s.distance.rLine && s.distance.lLine && s.distance.hasGlasses!=null),
+  distanceNeedsWheel: s => {
+    if(!s.distance) return false;
+    // worse than 6/12 (line index < 6) in either eye, no own-glasses fix -> wheel
+    return (s.distance.rLine && s.distance.rLine < 6) || (s.distance.lLine && s.distance.lLine < 6);
+  },
+  isNearComplete: s => !!(s.near && s.near.line && s.near.hasGlasses!=null),
+  nearNeedsPaddle: s => {
+    if(!s.intake) return false;
+    const band = s.intake.ageBand;
+    const olderAdd = ['35–44','45–54','55–64','65+'].includes(band);
+    const nearPoor = s.near && s.near.line && s.near.line < 7;
+    return olderAdd || nearPoor;
+  },
+  isWheelComplete: s => !!(s.wheel && s.wheel.pd && s.wheel.rType && s.wheel.lType),
+  isPaddleComplete: s => !!(s.paddle && s.paddle.power),
+
+  getNextRequiredStep(s){
+    if(!DE.isIntakeComplete(s)) return 'Registration';
+    if(!DE.isDistanceComplete(s)) return 'Distance';
+    if(DE.distanceNeedsWheel(s) && !DE.isWheelComplete(s)) return 'Wheel';
+    if(!DE.isNearComplete(s)) return 'Near';
+    if(DE.nearNeedsPaddle(s) && !DE.isPaddleComplete(s)) return 'Paddle';
+    return 'Dispense';
+  },
+  canDispense(s){
+    return DE.isIntakeComplete(s) && DE.isDistanceComplete(s) && DE.isNearComplete(s)
+      && (!DE.distanceNeedsWheel(s) || DE.isWheelComplete(s))
+      && (!DE.nearNeedsPaddle(s)   || DE.isPaddleComplete(s));
+  },
+  // station gating: may a device at `role` open this session now?
+  canOpenStep(s, role){
+    if(role==='Supervisor') return true;
+    const station = STEP_STATION[DE.getNextRequiredStep(s)];
+    if(role==='Dispense') return station==='Dispense' || s.status==='Finalised';
+    return station===role;
+  }
+};
+
+/* ============================ lens recommendation (prototype) ============================ */
+function buildRx(s){
+  // derive from actually-recorded wheel + paddle + distance data
+  const w=s.wheel||{}, p=s.paddle||{}, d=s.distance||{};
+  const sph = (t,pw)=> t==='Minus'? (pw||'-2.50') : t==='Plus'? (pw||'+1.50') : '0.00';
+  const wheelDone = !!(w.rType||w.lType);
+  const rSph = w.rType? sph(w.rType,w.rPower) : '0.00';
+  const lSph = w.lType? sph(w.lType,w.lPower) : '0.00';
+  const add  = p.power || null;
+  const worse = (d.rLine&&d.lLine)? snellen(Math.min(d.rLine,d.lLine),0) : (d.rSnellen||d.lSnellen||'—');
+  const sign = w.rType||w.lType;
+  return {
+    rSph, rCyl: wheelDone?'-0.75':'0.00', rAxis:'10°', rAdd: add||'—',
+    lSph, lCyl: wheelDone?'-0.50':'0.00', lAxis:'180°', lAdd: add||'—',
+    recType: add? 'SV with Add':'Single vision',
+    material:'CR-39, AR Coated',
+    distanceLabel: sign==='Minus'?'Myopia' : sign==='Plus'?'Hyperopia' : 'Within range',
+    distanceSnellen: worse,
+    wheelDone, cyl:'-0.75 D × 10°',
+    add, addVal: add? add+' D' : '—'
+  };
+}
+
+/* read-only client summary — surfaced at stations that need it (e.g. Dispense).
+   Demographics are entered once at Registration; here they are reference only. */
+function clientContext(s){
+  const k=s.intake||{}; const cat=k.cataract||'—'; const flag=/Yes/i.test(cat);
+  return `<div class="card" style="padding:14px 16px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <div class="ic sq" style="background:var(--chip);width:40px;height:40px">${I('person',20)}</div>
+      <div style="font-weight:800;font-size:16px">Client summary</div>
+      <span class="bothchip" style="margin-left:auto">Read-only</span>
+    </div>
+    <div class="ctxgrid">
+      ${ctxCell('Age band',k.ageBand)}${ctxCell('Gender',k.gender)}
+      ${ctxCell('Village',k.village)}${ctxCell('Cataract history',cat)}
+    </div>
+    ${flag?`<div class="notice warn" style="margin:12px 0 2px"><span class="x">${I('warn',20,'#f5b945')}</span><div><div class="t">Cataract history noted</div><div class="s">Check the OOXii referral / caution protocol before dispensing.</div></div></div>`:''}
+  </div>`;
+}
+function ctxCell(k,v){return `<div class="rxcell"><div class="k">${k}</div><div class="v">${v||'—'}</div></div>`;}
+
+/* ============================ in-memory state ============================ */
+const state = {
+  authed:false, remember:true,
+  role:'Supervisor',
+  device:'DISP-01',
+  activeId:null,
+  sessions:{},   // id -> session
+  queue:[],      // ordered ids shown on home
+  sync:[],       // finalised ids queued for sync
+};
+
+function seed(){
+  const mk=(id,intake,extra,status,path,dir,time)=>({
+    id, status, dir, time, path, version:1,
+    intake:Object.assign({sessionType:'Individual'},intake),
+    distance:null, near:null, wheel:null, paddle:null, dispense:null, ...extra
+  });
+  // A47-K : next required = Wheel  (distance done, poor vision, wheel pending)
+  state.sessions['A47-K']=mk('A47-K',
+    {ageBand:'45–54',gender:'Male',village:'Lelepa',cataract:'No'},
+    {distance:{rLine:5,rLn:1,rSnellen:'',lLine:5,lLn:0,lSnellen:'',hasGlasses:false}},
+    'Ready', ['Registration','Distance','Wheel'], 'out', '10:42');
+  // B12-M : received from wheel, next = Paddle
+  state.sessions['B12-M']=mk('B12-M',
+    {ageBand:'55–64',gender:'Female',village:'Mele',cataract:'No'},
+    {distance:{rLine:6,rLn:2,lLine:6,lLn:2,hasGlasses:false},
+     wheel:{pd:62,rType:'Minus',rPower:'-2.50',lType:'Minus',lPower:'-2.00'}},
+    'Received', ['Wheel','Paddle'], 'in', '09:58');
+  // C09-T : new-ish, next = Distance
+  state.sessions['C09-T']=mk('C09-T',
+    {ageBand:'20–34',gender:'Female',village:'Pango',cataract:'No'},
+    {}, 'Ready', ['Registration','Distance'], 'out', '09:31');
+  // recompute snellen for A47
+  const a=state.sessions['A47-K'].distance;
+  a.rSnellen=snellen(a.rLine,a.rLn); a.lSnellen=snellen(a.lLine,a.lLn);
+  state.queue=['A47-K','B12-M','C09-T'];
+}
+seed();
+
+/* ============================ icons ============================ */
+function I(name,size=24,stroke='#fff'){
+  const sw=2.1, p=`fill="none" stroke="${stroke}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round"`;
+  const map={
+    qr:`<rect x="3" y="3" width="7" height="7" rx="1.4"/><rect x="14" y="3" width="7" height="7" rx="1.4"/><rect x="3" y="14" width="7" height="7" rx="1.4"/><path d="M14 14h3v3M21 14v.01M21 17v4h-4M17 21h.01"/>`,
+    qrshow:`<rect x="5" y="3" width="14" height="13" rx="2"/><path d="M3 20h18"/><rect x="9" y="7" width="2.4" height="2.4"/><rect x="13" y="7" width="2.4" height="2.4"/><rect x="9" y="11" width="2.4" height="2.4"/><path d="M13 11h2.4v2.4"/>`,
+    palm:`<path d="M12 2v3a4 4 0 0 0 4 4M12 22c-4 0-7-3-7-7v-2a2 2 0 0 1 4 0M9 13V9a2 2 0 0 1 4 0v3"/>`,
+    clipboard:`<rect x="5" y="4" width="14" height="17" rx="2.5"/><path d="M9 4a3 3 0 0 1 6 0"/><circle cx="12" cy="11" r="2.2"/><path d="M8.5 17c.5-2 6.5-2 7 0"/>`,
+    glasses:`<circle cx="7" cy="14" r="3.2"/><circle cx="17" cy="14" r="3.2"/><path d="M10.2 14h3.6M4 11l1.5-3M20 11l-1.5-3"/>`,
+    wheel:`<circle cx="12" cy="12" r="8.4"/><path d="M12 3.6v16.8M3.6 12h16.8M6 6l12 12M18 6 6 18"/>`,
+    paddle:`<circle cx="9" cy="9" r="5"/><path d="M12.5 12.5 20 20"/>`,
+    person:`<circle cx="12" cy="8" r="3.6"/><path d="M5 20c0-3.6 3.1-5.6 7-5.6s7 2 7 5.6"/>`,
+    gender:`<circle cx="11" cy="13" r="4.5"/><path d="M14.5 9.5 20 4M20 4h-4M20 4v4"/>`,
+    home:`<path d="M4 11 12 4l8 7"/><path d="M6 10v9h12v-9"/><path d="M10 19v-5h4v5"/>`,
+    eye:`<path d="M2 12s3.6-6.4 10-6.4S22 12 22 12s-3.6 6.4-10 6.4S2 12 2 12Z"/><circle cx="12" cy="12" r="2.6"/>`,
+    note:`<rect x="5" y="3" width="14" height="18" rx="2.4"/><path d="M9 8h6M9 12h6M9 16h3"/>`,
+    cloud:`<path d="M7 17a4 4 0 0 1 0-8 5 5 0 0 1 9.5-1.5A3.5 3.5 0 0 1 17 17H7Z"/><path d="M12 12v6M9 15l3 3 3-3"/>`,
+    cloudup:`<path d="M7 18a4 4 0 0 1 0-8 5 5 0 0 1 9.5-1.5A3.5 3.5 0 0 1 17 18H7Z"/><path d="M12 16v-6M9 13l3-3 3 3"/>`,
+    check:`<path d="M20 6 9 17l-5-5"/>`,
+    shield:`<path d="M12 3 5 6v5c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V6l-7-3Z"/><path d="M9.5 12l1.8 1.8 3.2-3.6"/>`,
+    chevR:`<path d="M9 6l6 6-6 6"/>`,
+    arrowUp:`<path d="M12 19V5M6 11l6-6 6 6"/>`,
+    arrowDn:`<path d="M12 5v14M6 13l6 6 6-6"/>`,
+    arrowR:`<path d="M5 12h14M13 6l6 6-6 6"/>`,
+    back:`<path d="M15 18l-6-6 6-6"/>`,
+    info:`<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>`,
+    lens:`<ellipse cx="12" cy="12" rx="8" ry="5"/>`,
+    device:`<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>`,
+    scan:`<path d="M4 8V5a1 1 0 0 1 1-1h3M20 8V5a1 1 0 0 0-1-1h-3M4 16v3a1 1 0 0 0 1 1h3M20 16v3a1 1 0 0 1-1 1h-3M4 12h16"/>`,
+    warn:`<path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4M12 17h.01"/>`,
+  };
+  return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" ${p}>${map[name]||''}</svg>`;
+}
+
+/* ============================ tiny helpers ============================ */
+const $ = sel => document.getElementById('screen').querySelector(sel);
+const screenEl = ()=>document.getElementById('screen');
+function go(fn){ screenEl().scrollTop=0; fn(); }
+function pillClass(s){return 's-'+s.toLowerCase().replace(/[^a-z]/g,'');}
+function toast(msg,icon='check'){
+  const old=document.querySelector('.toast'); if(old)old.remove();
+  const t=document.createElement('div'); t.className='toast';
+  t.innerHTML=I(icon,20,'#1cc3d6')+`<span>${msg}</span>`;
+  document.getElementById('phone').appendChild(t);
+  setTimeout(()=>t.remove(),2600);
+}
+function header(client){
+  return `<div class="topbar">
+    <div class="logo"><b>oox</b><span class="dots">ii</span></div>
+    <div class="offline-wrap">
+      <span class="pill"><span class="dot"></span>Offline</span>
+      ${client?`<div class="client-sub">Client ${client}</div>`:`<div class="offline-sub">Sync later</div>`}
+    </div></div>`;
+}
+function privacy(extra){
+  return `<div class="privacy">
+    <div class="shield">${I('shield',22,'#a7add9')}</div>
+    <div>No personal data is stored on this device.<br>${extra||'Only anonymous client IDs.'}</div>
+    <button class="info-btn" onclick="showInfo()">i</button>
+  </div>`;
+}
+
+/* ============================ SIGN IN ============================ */
+function ScreenSignIn(){
+  screenEl().innerHTML = `<div class="pad">
+    ${header()}
+    <div class="camp" style="margin-top:34px">
+      <div class="camp-ic">${I('eye',28)}</div>
+      <div><h1>Welcome back</h1><p>Sign in to your OOXii tester account</p></div>
+    </div>
+    <div style="margin-top:30px">
+      <div class="signin-field"><label>Email</label><input id="si-email" class="full" type="email" placeholder="tester@ooxii.org" value="ana.t@ooxii.org"></div>
+      <div class="signin-field"><label>Password</label><input id="si-pass" class="full" type="password" placeholder="••••••••" value="Camp!2025"></div>
+      <div id="si-err" class="err" style="display:none"></div>
+      <div class="checkrow" onclick="toggleRemember(this)">
+        <span class="checkbox ${state.remember?'on':''}">${state.remember?I('check',16):''}</span>
+        Remember this device (30-day offline access)
+      </div>
+      <button class="btn btn-primary" onclick="doSignIn()">Sign in</button>
+      <button class="btn btn-secondary" onclick="toast('Account creation needs internet — stub in this demo','cloud')">Create account</button>
+    </div>
+    <div class="hint">Internet is needed only to sign in, download camp config and sync later.<br>After that the camp runs fully offline for 30 days.</div>
+  </div>`;
+}
+function toggleRemember(el){ state.remember=!state.remember;
+  const c=el.querySelector('.checkbox'); c.classList.toggle('on',state.remember); c.innerHTML=state.remember?I('check',16):''; }
+function doSignIn(){
+  const email=$('#si-email').value.trim(), pass=$('#si-pass').value;
+  const err=$('#si-err');
+  if(!email || !pass){ err.style.display='block'; err.textContent='Enter your email and password.'; return; }
+  state.authed=true; go(ScreenHome);
+}
+
+/* ============================ HOME ============================ */
+function ScreenHome(){
+  const active = state.activeId && state.sessions[state.activeId];
+  const roleBtns = ['Supervisor','Registration','Distance','Wheel','Paddle','Dispense'].map(r=>
+    `<button class="roletag ${state.role===r?'on':''}" onclick="setRole('${r}')">${r}</button>`).join('');
+
+  const devices = DEVICES.map(d=>`
+    <div class="row" onclick="toast('${d.role} • ${d.id} • ${cap(d.status)}','device')">
+      <div class="ic" style="background:${d.col}">${I(d.ic,24)}</div>
+      <div class="grow"><div class="name">${d.role}</div><div class="sub">${d.id}</div></div>
+      <span class="statpill ${pillClass(d.status)}">${d.status==='working'?'<span class="dot" style="background:#4d8bf5;box-shadow:0 0 8px #4d8bf5"></span>':'<span class="dot"></span>'}${cap(d.status)}</span>
+      <span class="chev">${I('chevR',20,'#7c83b4')}</span>
+    </div>`).join('');
+
+  const queue = state.queue.map(id=>{
+    const s=state.sessions[id];
+    return `<div class="row" onclick="openQueueItem('${id}')">
+      <div class="ic" style="background:${s.dir==='in'?'rgba(77,139,245,.18)':'rgba(74,222,128,.14)'};border:1px solid ${s.dir==='in'?'rgba(77,139,245,.5)':'rgba(74,222,128,.4)'}">
+        ${I(s.dir==='in'?'arrowDn':'arrowUp',22,s.dir==='in'?'#4d8bf5':'#4ade80')}</div>
+      <div class="grow">
+        <div class="name">${id}</div>
+        <div class="sub">${s.path.join('  →  ')}</div>
+      </div>
+      <span class="statpill ${pillClass(s.status)}"><span class="dot" style="background:${queueDot(s.status)};box-shadow:0 0 8px ${queueDot(s.status)}"></span>${s.status}</span>
+      <span class="time">${s.time}</span>
+      <span class="chev">${I('chevR',18,'#7c83b4')}</span>
+    </div>`;
+  }).join('');
+
+  screenEl().innerHTML = `<div class="pad pb">
+    ${header()}
+    <div class="camp">
+      <div class="camp-ic">${I('home',26)}</div>
+      <div><h1>Port Vila Eye Camp</h1><p>Vanuatu</p></div>
+    </div>
+
+    <div class="rolebar">
+      <span class="lbl">This device acts as:</span>${roleBtns}
+    </div>
+
+    <div class="actions">
+      <button class="action" onclick="openScanner()">
+        ${I('qr',46)}<div class="t">Scan client QR</div><div class="s">Continue a client</div></button>
+      <button class="action" ${active?'':'disabled'} onclick="${active?`showHandoverQR('${state.activeId}')`:''}">
+        ${I('qrshow',46)}<div class="t">Show handover QR</div><div class="s">${active?'Client '+state.activeId:'Share client progress'}</div></button>
+    </div>
+
+    <div class="sec"><h2>Active devices</h2><span class="meta">5 devices ${I('device',18,'#1cc3d6')}</span></div>
+    ${devices}
+
+    <div class="sec"><h2>Handover queue</h2><span class="meta">${state.queue.length} items</span></div>
+    ${queue || `<div class="card" style="padding:20px;text-align:center;color:var(--dim)">No clients yet. Tap “Scan client QR” or start a new client below.</div>`}
+
+    <button class="btn btn-secondary" style="margin-top:14px" onclick="startNewClient()">+ New client</button>
+    <button class="btn btn-secondary" onclick="go(ScreenSync)">Sync queue (${state.sync.length})</button>
+
+    ${privacy()}
+  </div>`;
+}
+function queueDot(s){ return ({Ready:'#4ade80',Received:'#4d8bf5',Waiting:'#f5b945',Blocked:'#f06a7a',Conflict:'#f06a7a'})[s]||'#4ade80'; }
+function cap(x){return x.charAt(0).toUpperCase()+x.slice(1);}
+function setRole(r){ state.role=r; go(ScreenHome); }
+
+/* gated open from queue */
+function openQueueItem(id){
+  const s=state.sessions[id];
+  if(!DE.canOpenStep(s,state.role)){
+    const next=DE.getNextRequiredStep(s);
+    showBlock(next); return;
+  }
+  state.activeId=id;
+  routeToStep(s);
+}
+function routeToStep(s){
+  const next = s.status==='Finalised' ? 'Dispense' : DE.getNextRequiredStep(s);
+  ({Registration:ScreenIntake, Distance:ScreenDistance, Near:ScreenNear, Wheel:ScreenWheel, Paddle:ScreenPaddle, Dispense:ScreenDispense}[next]||ScreenDispense)();
+}
+
+/* ============================ NEW CLIENT INTAKE ============================ */
+function startNewClient(){
+  const id=newAnonId();
+  state.sessions[id]={id,status:'Draft',dir:'out',time:nowTime(),path:['Registration'],version:1,
+    intake:{sessionType:'Individual'},distance:null,near:null,wheel:null,paddle:null,dispense:null};
+  state.activeId=id;
+  go(ScreenIntake);
+}
+function nowTime(){const d=new Date();return d.toTimeString().slice(0,5);}
+
+function ScreenIntake(){
+  const s=state.sessions[state.activeId]; const k=s.intake;
+  screenEl().innerHTML=`<div class="pad pb">
+    ${header(s.id)}
+    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Works without internet</div><div class="s">Saved on this device</div></div></div>
+
+    <div class="card" style="padding:16px;margin-bottom:14px;display:flex;align-items:center;gap:12px">
+      <div class="ic sq" style="background:var(--chip)">${I('qr',24)}</div>
+      <div class="grow"><div class="name">Anonymous OOXii ID</div><div class="sub">Auto-generated · check character validated</div></div>
+      <div class="readout" style="min-width:auto">${s.id}</div>
+    </div>
+
+    ${fieldSelect('person','Age band',null,'in-age',AGE_BANDS,k.ageBand)}
+    ${fieldSeg('gender','Gender',null,'in-gender',['Male','Female'],k.gender)}
+    ${fieldSelect('home','Village / Location','From camp list','in-village',VILLAGES,k.village)}
+    ${fieldSelect('eye','Had cataract surgery?',null,'in-cat',['No','Yes, right eye','Yes, left eye','Yes, both eyes','Unsure'],k.cataract)}
+    ${fieldSeg('clipboard','Session type',null,'in-type',['Individual','Group'],k.sessionType||'Individual')}
+
+    <div class="frow" style="align-items:flex-start">
+      <div class="fic">${I('note',22)}</div>
+      <div class="flabel" style="width:100%">
+        <div class="l">Notes <span style="color:var(--dim);font-weight:600">(optional)</span></div>
+        <input id="in-notes" class="full" style="margin-top:9px" type="text" placeholder="Clinical notes only…" value="${k.notes||''}">
+        <div id="notes-err" class="err" style="display:none"></div>
+        <div class="h" style="margin-top:7px">Do not enter names, phone numbers or personal details.</div>
+      </div>
+    </div>
+  </div>
+  <div class="btn-row"><button class="btn btn-primary" onclick="saveIntake()">Start test ${I('arrowR',22)}</button></div>`;
+  wireSeg('in-gender'); wireSeg('in-type');
+}
+function saveIntake(){
+  const s=state.sessions[state.activeId];
+  const notes=$('#in-notes').value;
+  if(/\b\d{6,}\b|@|\+?\d[\d\s-]{7,}/.test(notes)){
+    const e=$('#notes-err'); e.style.display='block'; e.textContent='That looks like personal data (number/email). Remove it before saving.'; return;
+  }
+  s.intake={
+    ageBand:$('#in-age').value, gender:segVal('in-gender'), village:$('#in-village').value,
+    cataract:$('#in-cat').value, sessionType:segVal('in-type'), notes
+  };
+  if(!s.intake.ageBand||!s.intake.gender||!s.intake.village||!s.intake.cataract){ toast('Complete all required fields','warn'); return; }
+  s.status='In Progress'; s.path=['Registration','Distance']; s.dir='out'; s.time=nowTime(); s.version++;
+  if(!state.queue.includes(s.id)) state.queue.unshift(s.id);
+  showHandoverQR(s.id, ()=>go(ScreenDistance));
+}
+
+/* ============================ DISTANCE ============================ */
+function ScreenDistance(){
+  const s=state.sessions[state.activeId]; const d=s.distance||(s.distance={hasGlasses:null});
+  screenEl().innerHTML=`<div class="pad pb">
+    ${header(s.id)}
+    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    ${stepper('Distance', s)}
+    <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Works without internet</div><div class="s">Saved on this device</div></div></div>
+
+    ${instructionCard(eyeCoverGraphic('L'),'Right eye · no glasses','Ask the person to cover their left eye with the palm of their hand.')}
+    ${fieldEyeLine('Smallest line all correct','d-rline',d.rLine,'r')}
+    ${fieldLetters('Letters correct on next line','d-rlet',d.rLn)}
+    ${fieldReadout('Right eye result','d-rsnellen', snellen(d.rLine,d.rLn))}
+
+    ${instructionCard(eyeCoverGraphic('R'),'Left eye · no glasses','Ask the person to cover their right eye with the palm of their hand.')}
+    ${fieldEyeLine('Smallest line all correct','d-lline',d.lLine,'l')}
+    ${fieldLetters('Letters correct on next line','d-llet',d.lLn)}
+    ${fieldReadout('Left eye result','d-lsnellen', snellen(d.lLine,d.lLn))}
+
+    ${fieldSeg('glasses','Has distance glasses?',null,'d-glass',['Yes','No'], d.hasGlasses==null?null:(d.hasGlasses?'Yes':'No'))}
+    <div id="d-own"></div>
+  </div>
+  <div class="btn-row"><button class="btn btn-primary" id="d-save" onclick="saveDistance()">Save &amp; show next step ${I('arrowR',22)}</button></div>`;
+  // live snellen
+  ['d-rline','d-rlet'].forEach(id=>$('#'+id).addEventListener('change',()=>{$('#d-rsnellen').textContent=snellen(+$('#d-rline').value||0,+$('#d-rlet').value||0);}));
+  ['d-lline','d-llet'].forEach(id=>$('#'+id).addEventListener('change',()=>{$('#d-lsnellen').textContent=snellen(+$('#d-lline').value||0,+$('#d-llet').value||0);}));
+  wireSeg('d-glass', renderOwnGlasses);
+  if(d.hasGlasses) renderOwnGlasses('Yes');
+}
+function renderOwnGlasses(v){
+  const wrap=$('#d-own'); if(v!=='Yes'){wrap.innerHTML=''; return;}
+  const d=state.sessions[state.activeId].distance;
+  wrap.innerHTML=`
+    ${instructionCard(bothEyesGraphic(true),'With own glasses · both eyes open','Ask the person to keep both eyes open and wear their own distance glasses.')}
+    ${fieldEyeLine('Smallest line all correct','d-owline',d.owLine,'both')}
+    ${fieldLetters('Letters correct on next line','d-owlet',d.owLn)}
+    ${fieldReadout('Both eyes with glasses','d-owsnellen', snellen(d.owLine,d.owLn))}`;
+  ['d-owline','d-owlet'].forEach(id=>$('#'+id).addEventListener('change',()=>{$('#d-owsnellen').textContent=snellen(+$('#d-owline').value||0,+$('#d-owlet').value||0);}));
+}
+function saveDistance(){
+  const s=state.sessions[state.activeId]; const g=segVal('d-glass');
+  const rLine=+$('#d-rline').value, lLine=+$('#d-lline').value;
+  if(!rLine||!lLine||!g){ toast('Complete both eyes and the glasses question','warn'); return; }
+  s.distance={ rLine, rLn:+$('#d-rlet').value||0, rSnellen:snellen(rLine,+$('#d-rlet').value||0),
+    lLine, lLn:+$('#d-llet').value||0, lSnellen:snellen(lLine,+$('#d-llet').value||0),
+    hasGlasses:g==='Yes',
+    owLine:g==='Yes'?+$('#d-owline').value:null, owLn:g==='Yes'?(+$('#d-owlet').value||0):null };
+  s.version++; advance(s);
+}
+
+/* ============================ NEAR ============================ */
+function ScreenNear(){
+  const s=state.sessions[state.activeId]; const n=s.near||(s.near={hasGlasses:null});
+  screenEl().innerHTML=`<div class="pad pb">
+    ${header(s.id)}
+    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    ${stepper('Distance', s)}
+    <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Near vision screening</div><div class="s">Saved on this device</div></div></div>
+
+    ${instructionCard(bothEyesGraphic(),'Near vision · no glasses','Ask the person to use both eyes to read the near card.')}
+    ${fieldEyeLine('Smallest near line all correct','n-line',n.line,'both')}
+    ${fieldReadout('Both eyes near result','n-snellen', snellen(n.line,0))}
+
+    ${fieldSeg('glasses','Has reading glasses?',null,'n-glass',['Yes','No'], n.hasGlasses==null?null:(n.hasGlasses?'Yes':'No'))}
+    <div id="n-own"></div>
+  </div>
+  <div class="btn-row"><button class="btn btn-primary" onclick="saveNear()">Save &amp; show next step ${I('arrowR',22)}</button></div>`;
+  $('#n-line').addEventListener('change',()=>{$('#n-snellen').textContent=snellen(+$('#n-line').value||0,0);});
+  wireSeg('n-glass',(v)=>{
+    const w=$('#n-own'); if(v!=='Yes'){w.innerHTML='';return;}
+    w.innerHTML=`${instructionCard(bothEyesGraphic(true),'With own reading glasses','Ask the person to use both eyes with their own reading glasses.')}
+      ${fieldEyeLine('Smallest near line all correct','n-owline',n.owLine,'both')}
+      ${fieldReadout('Both eyes with glasses','n-owsnellen', snellen(n.owLine,0))}`;
+    $('#n-owline').addEventListener('change',()=>{$('#n-owsnellen').textContent=snellen(+$('#n-owline').value||0,0);});
+  });
+  if(n.hasGlasses) wireSeg('n-glass');
+}
+function saveNear(){
+  const s=state.sessions[state.activeId]; const g=segVal('n-glass'); const line=+$('#n-line').value;
+  if(!line||!g){ toast('Complete near line and glasses question','warn'); return; }
+  s.near={line, snellen:snellen(line,0), hasGlasses:g==='Yes', owLine:g==='Yes'?+$('#n-owline').value:null};
+  s.version++; advance(s);
+}
+
+/* ============================ WHEEL ============================ */
+function ScreenWheel(){
+  const s=state.sessions[state.activeId]; const w=s.wheel||(s.wheel={});
+  screenEl().innerHTML=`<div class="pad pb">
+    ${header(s.id)}
+    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    ${stepper('Wheel', s)}
+    <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Wheel test · to improve distance vision</div><div class="s">Saved on this device</div></div></div>
+
+    ${fieldNumber('wheel','Pupillary distance (PD)','Valid range 52–78','w-pd',w.pd,52,78)}
+
+    ${eyeBlock('Right eye','r', w, 'Make sure the black lens is covering the left eye.')}
+    ${eyeBlock('Left eye','l', w, 'Make sure the black lens is covering the right eye.')}
+  </div>
+  <div class="btn-row"><button class="btn btn-primary" onclick="saveWheel()">Save &amp; show next step ${I('arrowR',22)}</button></div>`;
+  ['r','l'].forEach(side=>{
+    const t=$('#w-'+side+'type');
+    t.addEventListener('change',()=>{ $('#w-'+side+'pow-wrap').style.display = (t.value==='Plus'||t.value==='Minus')?'flex':'none'; });
+  });
+}
+function eyeBlock(title,side,w,instr){
+  const marker = side==='r'? '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--blue);margin-right:8px;vertical-align:middle"></span>'
+                           : '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#fff;margin-right:8px;vertical-align:middle"></span>';
+  const t=w[side+'Type'];
+  return `<div class="sec" style="margin:22px 2px 10px"><h2 style="font-size:18px">${marker}${title}</h2></div>
+    ${instructionCard(eyeCoverGraphic(side==='r'?'L':'R'), 'Cover the other eye', instr)}
+    <div class="frow"><div class="fic">${I('wheel',22)}</div><div class="flabel"><div class="l">Best lens is</div></div>
+      <div class="fctl"><select id="w-${side}type">${opt(['','Plus','Minus','Neither'],t,{'':'Select…','Neither':'Neither helps'})}</select></div></div>
+    <div class="frow" id="w-${side}pow-wrap" style="display:${(t==='Plus'||t==='Minus')?'flex':'none'}"><div class="fic">${I('lens',22)}</div>
+      <div class="flabel"><div class="l">Best plus/minus power</div></div>
+      <div class="fctl"><select id="w-${side}pow">${opt(LENS_POWERS,w[side+'Power'],{'':'—'})}</select></div></div>
+    <div class="frow"><div class="fic" style="background:linear-gradient(90deg,#d23b4e 50%,#2bb56a 50%)">${I('eye',22)}</div><div class="flabel"><div class="l">Two-colour test</div><div class="h">Which side looks sharper / darker?</div></div>
+      <div class="fctl"><select id="w-${side}2c">${opt(['','Red','Green','Same'],w[side+'TwoColour'],{'':'Select…','Red':'Red side','Green':'Green side','Same':'Same'})}</select></div></div>`;
+}
+function saveWheel(){
+  const s=state.sessions[state.activeId]; const pd=+$('#w-pd').value;
+  if(!(pd>=52&&pd<=78)){ toast('PD must be between 52 and 78','warn'); return; }
+  const rType=$('#w-rtype').value, lType=$('#w-ltype').value;
+  if(!rType||!lType){ toast('Select best lens type for both eyes','warn'); return; }
+  s.wheel={ pd, rType, rPower:$('#w-rpow').value, rTwoColour:$('#w-r2c').value,
+            lType, lPower:$('#w-lpow').value, lTwoColour:$('#w-l2c').value };
+  s.version++; advance(s);
+}
+
+/* ============================ PADDLE — single purpose: preferred reading power ============================ */
+function ScreenPaddle(){
+  const s=state.sessions[state.activeId]; const p=s.paddle||(s.paddle={});
+  screenEl().innerHTML=`<div class="pad pb">
+    ${header(s.id)}
+    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    ${stepper('Paddle', s)}
+    <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Paddle test · preferred reading power</div><div class="s">Saved on this device</div></div></div>
+
+    ${instructionCard(nearPaddleGraphic(),'Find the preferred reading power','While looking through the wheel lenses at the near vision chart, use the paddle to find the reading power the client prefers.')}
+
+    <div class="vfield">
+      <div class="vhead"><div class="fic">${I('paddle',22)}</div><div class="l">Preferred reading lens power</div></div>
+      <div class="vctl"><select id="p-power" class="full" onchange="document.getElementById('p-add').textContent=this.value||'—'">${opt(PADDLE_POWERS,p.power,{'':'Choose power…'})}</select></div>
+    </div>
+
+    <div class="resultbar">
+      <div class="rl"><span class="lab">${I('check',16,'#1cc3d6')} Recommended near add</span><span class="sub">From preferred paddle power</span></div>
+      <div class="readout" id="p-add">${p.power||'—'}</div>
+    </div>
+
+    <div class="frow" style="align-items:flex-start"><div class="fic">${I('note',22)}</div>
+      <div class="flabel" style="width:100%"><div class="l">Notes <span style="color:var(--dim);font-weight:600">(optional)</span></div>
+      <input id="p-notes" class="full" style="margin-top:9px" type="text" placeholder="Clinical notes only…" value="${p.notes||''}">
+      <div class="h" style="margin-top:7px">Do not enter names, phone numbers or personal details.</div></div></div>
+  </div>
+  <div class="btn-row"><button class="btn btn-primary" onclick="savePaddle()">Save &amp; show next step ${I('arrowR',22)}</button></div>`;
+}
+function savePaddle(){
+  const s=state.sessions[state.activeId]; const power=$('#p-power').value;
+  if(!power){ toast('Select preferred reading lens power','warn'); return; }
+  s.paddle={power, recommendedAdd:power, notes:$('#p-notes').value}; s.version++; advance(s);
+}
+
+/* ============================ DISPENSE (faithful to hi-fi screen 3) ============================ */
+function ScreenDispense(){
+  const s=state.sessions[state.activeId];
+  if(!DE.canDispense(s) && s.status!=='Finalised'){
+    const next=DE.getNextRequiredStep(s); showBlock(next); return;
+  }
+  const rx=buildRx(s); const finalised=s.status==='Finalised';
+  screenEl().innerHTML=`<div class="pad pb">
+    ${header(s.id)}
+    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    ${stepper('Dispense', s)}
+
+    <div class="statusblock">
+      <div class="ok">${I('check',26,'#4ade80')}</div>
+      <div><h2>${finalised?'Glasses confirmed':'Ready to dispense'}</h2><p>Review and confirm glasses for client ${s.id}.</p></div>
+    </div>
+
+    ${clientContext(s)}
+
+    <div class="card sumcard">
+      <div style="font-weight:800;font-size:18px;padding:14px 0 4px">Test results summary</div>
+      ${sumRow('glasses','#1d8aa6','Distance result','No glasses · Distance station', rx.distanceLabel, rx.distanceSnellen,'#1cc3d6')}
+      ${rx.wheelDone? sumRow('wheel','#1d8aa6','Wheel result','Cylinder','With astigmatism', rx.cyl,'#fff') : ''}
+      ${sumRow('paddle','#7a52c0','Near vision result','Paddle', rx.add?'Reading add':'No add needed', rx.addVal,'#fff')}
+      ${sumRow('lens','#1d8aa6','Lens recommendation','Single vision'+(rx.add?' with near add':''), rx.recType, rx.material,'#fff')}
+    </div>
+
+    <div class="sec" style="margin:24px 2px 10px"><h2>Prescription to dispense</h2></div>
+    <div class="card rx">
+      <div>
+        <h4><span class="marker m-r"></span>Right Eye (OD)</h4>
+        <div class="rxgrid">
+          ${rxCell('SPH',rx.rSph)}${rxCell('CYL',rx.rCyl)}${rxCell('AXIS',rx.rAxis)}${rxCell('ADD',rx.rAdd)}
+        </div>
+        <div class="selected-lens"><div class="k">Selected lens</div>
+          <div class="lens-r">Stock S${rx.rSph} C${rx.rCyl} AX 10 ADD ${rx.rAdd}</div></div>
+      </div>
+      <div>
+        <h4><span class="marker m-l"></span>Left Eye (OS)</h4>
+        <div class="rxgrid">
+          ${rxCell('SPH',rx.lSph)}${rxCell('CYL',rx.lCyl)}${rxCell('AXIS',rx.lAxis)}${rxCell('ADD',rx.lAdd)}
+        </div>
+        <div class="selected-lens"><div class="k">Selected lens</div>
+          <div class="lens-l">Stock S${rx.lSph} C${rx.lCyl} AX 180 ADD ${rx.lAdd}</div></div>
+      </div>
+    </div>
+
+    <div class="card qrcard" onclick="showHandoverQR('${s.id}')">
+      <div class="ic sq" style="background:var(--chip);width:54px;height:54px">${I('qrshow',28)}</div>
+      <div class="grow"><div class="t">Transfer summary</div><div class="s">Show this QR code on another device to transfer the full session summary.</div></div>
+      <span class="chev">${I('chevR',22,'#a7add9')}</span>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button class="btn btn-primary" ${finalised?'disabled':''} onclick="confirmGlasses()">${I('check',22)} ${finalised?'Confirmed':'Confirm glasses given'}</button>
+    <button class="btn btn-secondary" onclick="saveForSync()">${I('cloudup',22,'#fff')} Save for sync later</button>
+    ${privacy('Only anonymous ID '+s.id+'. Session will sync when internet returns.')}
+  </div>`;
+}
+function confirmGlasses(){
+  const s=state.sessions[state.activeId];
+  s.dispense={glassesDispensed:true,status:'Given',dispensedAt:nowTime()};
+  s.status='Finalised'; s.version++;
+  toast('Glasses confirmed for '+s.id);
+  go(ScreenDispense);
+}
+function saveForSync(){
+  const s=state.sessions[state.activeId];
+  if(s.status!=='Finalised'){ s.status='Finalised'; s.dispense=s.dispense||{status:'Given'}; }
+  if(!state.sync.includes(s.id)) state.sync.push(s.id);
+  s.syncStatus='Queued';
+  // reflect on home queue
+  const qi=state.queue.indexOf(s.id); if(qi>-1){ state.sessions[s.id].time=nowTime(); }
+  toast('Saved to sync queue');
+  setTimeout(()=>go(ScreenSync),500);
+}
+
+/* ============================ SYNC QUEUE ============================ */
+function ScreenSync(){
+  const items = state.sync.map(id=>{
+    const s=state.sessions[id]; const st=s.syncStatus||'Queued';
+    return `<div class="row" style="cursor:default">
+      <div class="ic sq" style="background:var(--chip)">${I('cloudup',22)}</div>
+      <div class="grow"><div class="name">${id}</div><div class="sub">Finalised · ${s.intake.village}</div></div>
+      <span class="statpill ${st==='Synced'?'s-ready':st==='Failed'?'s-error':'s-waiting'}"><span class="dot" style="background:${st==='Synced'?'#4ade80':st==='Failed'?'#f06a7a':'#f5b945'}"></span>${st}</span>
+    </div>`;}).join('');
+  screenEl().innerHTML=`<div class="pad pb">
+    ${header()}
+    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync queue</h1><p>${state.sync.length} finalised session${state.sync.length===1?'':'s'} waiting</p></div></div>
+    <div class="notice warn" style="margin-top:20px"><span class="x">${I('warn',22,'#f5b945')}</span><div><div class="t">No internet at camp</div><div class="s">Sessions stay safe on this device and upload automatically when internet returns. Testing is never interrupted.</div></div></div>
+    <div style="margin-top:8px">${items||'<div class="card" style="padding:22px;text-align:center;color:var(--dim)">Nothing queued yet.</div>'}</div>
+    ${state.sync.length?`<button class="btn btn-primary" style="margin-top:14px" onclick="simulateSync()">${I('cloud',22)} Simulate “internet returned”</button>`:''}
+    ${privacy()}
+  </div>`;
+}
+function simulateSync(){
+  state.sync.forEach(id=> state.sessions[id].syncStatus='Syncing');
+  go(ScreenSync); toast('Syncing in background…','cloud');
+  setTimeout(()=>{ state.sync.forEach(id=> state.sessions[id].syncStatus='Synced'); go(ScreenSync); toast('All sessions synced'); },1500);
+}
+
+/* ============================ QR SCANNER (simulated) ============================ */
+function openScanner(){
+  const opts=state.queue.map(id=>`<button class="row" style="width:100%;text-align:left" onclick="scanResult('${id}')">
+    <div class="ic sq" style="background:var(--chip)">${I('qr',22)}</div>
+    <div class="grow"><div class="name">${id}</div><div class="sub">Next: ${DE.getNextRequiredStep(state.sessions[id])}</div></div>
+    <span class="chev">${I('chevR',18,'#7c83b4')}</span></button>`).join('');
+  scrim(`<div class="modal" style="max-width:330px">
+    <div class="ic sq" style="background:var(--chip);width:64px;height:64px;margin:0 auto 12px">${I('scan',34,'#1cc3d6')}</div>
+    <h3>Scan client QR</h3>
+    <p>Point the camera at another device's handover QR. (Demo: pick a code below to simulate a scan.)</p>
+    <div style="text-align:left;margin-top:6px">${opts||'<p style="text-align:center">No codes in range.</p>'}</div>
+    <button class="btn btn-secondary" onclick="closeScrim()">Cancel</button>
+  </div>`);
+}
+function scanResult(id){
+  closeScrim();
+  const s=state.sessions[id];
+  if(!DE.canOpenStep(s,state.role)){ showBlock(DE.getNextRequiredStep(s)); return; }
+  state.activeId=id; routeToStep(s);
+}
+
+/* ============================ QR HANDOVER MODAL (real QR + fallback) ============================ */
+function showHandoverQR(id, after){
+  const s=state.sessions[id];
+  const payload=JSON.stringify({
+    v:1, camp:'PVEC-VU', cid:s.id, sid:'uuid-'+s.id,
+    step:DE.getNextRequiredStep(s), status:s.status, ver:s.version, ts:Date.now(),
+    dev:state.device, mac:'sig:'+(s.version*7+s.id.length)
+  });
+  scrim(`<div class="modal">
+    <h3>Handover QR</h3>
+    <div class="id-big">${s.id}</div>
+    <p>Next step: <b style="color:#fff">${DE.getNextRequiredStep(s)}</b><br>Scan on the next station's device to continue.</p>
+    <div class="qrbox" id="qr-target"></div>
+    <p style="font-size:12px;margin-top:0">No personal data — anonymous clinical workflow only.</p>
+    <button class="btn btn-primary" onclick="closeScrim();${after?'__qrAfter()':''}">Done</button>
+  </div>`);
+  window.__qrAfter = after||null;
+  const target=document.getElementById('qr-target');
+  try{
+    if(window.QRCode){ new QRCode(target,{text:payload,width:190,height:190,correctLevel:QRCode.CorrectLevel.M}); }
+    else throw new Error('no lib');
+  }catch(e){
+    target.innerHTML=`<div class="qr-fallback">${payload}</div>`;
+  }
+}
+
+/* ============================ blocking / info modals ============================ */
+function showBlock(nextStep){
+  const station = STEP_STATION[nextStep] || nextStep;
+  const stepNote = (station!==nextStep) ? `${nextStep} (done at the ${station} station)` : nextStep;
+  scrim(`<div class="modal">
+    <div class="ic sq" style="background:rgba(240,106,122,.12);border:1px solid rgba(240,106,122,.4);width:60px;height:60px;margin:0 auto 12px">${I('warn',30,'#f06a7a')}</div>
+    <h3>Wrong station</h3>
+    <p>This device is acting as <b style="color:#fff">${state.role}</b>, but the next step for this client is <b style="color:#fff">${stepNote}</b>.<br><br>Please send the client to the <b style="color:#1cc3d6">${station}</b> station.</p>
+    <button class="btn btn-secondary" onclick="closeScrim()">Back to camp home</button>
+  </div>`);
+}
+function showInfo(){
+  scrim(`<div class="modal" style="text-align:left">
+    <h3 style="text-align:center">Offline & anonymous</h3>
+    <p>This app works with no internet. Every test is saved on this device and shared between stations using QR codes.</p>
+    <p>Clients are only ever identified by a short anonymous ID with a check character (like <b style="color:#1cc3d6">A47-K</b>). No names, birth dates, phone numbers or addresses are stored.</p>
+    <button class="btn btn-primary" onclick="closeScrim()">Got it</button>
+  </div>`);
+}
+
+/* ---- OOXii-style flat illustrations (original art, friendly figure on teal square) ---- */
+const SKIN='#a86c3e', SKIN_D='#8c5832', HAIR='#22191a', SHIRT='#cfe8df', TEAL_ART='#3ba7c1';
+function illo(inner){
+  return `<svg width="140" height="140" viewBox="0 0 136 136" fill="none" aria-hidden="true">
+    <rect width="136" height="136" rx="14" fill="${TEAL_ART}"/>${inner}</svg>`;
+}
+function personBase(){
+  return `<path d="M22 136 C22 105 41 95 68 95 C95 95 114 105 114 136 Z" fill="${SHIRT}"/>
+    <path d="M60 92 h16 v9 q-8 6 -16 0 Z" fill="#bcdacf"/>
+    <rect x="59" y="82" width="18" height="18" rx="8" fill="${SKIN_D}"/>
+    <circle cx="68" cy="60" r="30" fill="${SKIN}"/>
+    <path d="M37 60 C34 28 56 19 68 19 C80 19 102 28 99 60 C96 50 90 47 86 49 C89 41 80 37 73 39 C66 34 57 39 58 47 C52 45 44 48 44 57 C41 53 38 56 37 60 Z" fill="${HAIR}"/>
+    <path d="M61 79 q7 5 14 0" stroke="${SKIN_D}" stroke-width="2.4" stroke-linecap="round" fill="none"/>`;
+}
+function openEye(cx){
+  return `<path d="M${cx-7} 54 q7 -4 14 0" stroke="${HAIR}" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+    <ellipse cx="${cx}" cy="61" rx="6.6" ry="5.2" fill="#fff"/><circle cx="${cx+1}" cy="61.5" r="2.9" fill="${HAIR}"/>`;
+}
+function handCover(){
+  return `<g><path d="M40 44 C32 49 31 67 41 75 C51 83 67 80 69 67 C71 55 63 45 55 43 C49 41 44 41 40 44 Z" fill="${SKIN}"/>
+    <path d="M47 47 v25 M54 46 v27 M61 49 v22" stroke="${SKIN_D}" stroke-width="1.5" stroke-linecap="round" opacity=".55"/></g>`;
+}
+function glassesArt(){
+  return `<g stroke="#23306b" stroke-width="2.6" fill="rgba(255,255,255,.22)">
+    <rect x="43" y="54" width="19" height="14" rx="6"/><rect x="74" y="54" width="19" height="14" rx="6"/>
+    <path d="M62 60 h12" fill="none"/></g>`;
+}
+/* coveredEye = the person's eye that is covered ('R' = viewer-left, 'L' = viewer-right) */
+function eyeCoverGraphic(coveredEye){
+  const flip = coveredEye==='L' ? ' transform="translate(136,0) scale(-1,1)"' : '';
+  return illo(`<g${flip}>${personBase()}${openEye(82)}${handCover()}</g>`);
+}
+function bothEyesGraphic(withGlasses){
+  return illo(`${personBase()}${openEye(54)}${openEye(82)}${withGlasses?glassesArt():''}`);
+}
+function nearPaddleGraphic(){
+  return illo(`${personBase()}${openEye(54)}${openEye(82)}
+    <g transform="rotate(-5 70 116)"><rect x="38" y="103" width="64" height="27" rx="5" fill="#fff"/>
+      <path d="M46 111h48M46 118h40M46 124h44" stroke="${TEAL_ART}" stroke-width="2" stroke-linecap="round"/></g>
+    <circle cx="106" cy="84" r="9" fill="#8a5cc6" stroke="#fff" stroke-width="2.2"/>
+    <path d="M106 93 v15" stroke="#8a5cc6" stroke-width="3" stroke-linecap="round"/>`);
+}
+/* mini Snellen-chart glyph (small inline icon, used inside line-select fields) */
+function chartGlyph(){
+  return `<svg width="26" height="26" viewBox="0 0 26 26" aria-hidden="true">
+    <text x="13" y="9" font-size="9" font-weight="800" text-anchor="middle" fill="#fff">E</text>
+    <text x="13" y="17" font-size="6" font-weight="800" text-anchor="middle" fill="#fff">F P</text>
+    <text x="13" y="23.5" font-size="4.3" font-weight="800" text-anchor="middle" fill="#fff">T O Z</text></svg>`;
+}
+function instructionCard(graphic, title, body){
+  return `<div class="instruction"><div class="instr-t">${title}</div><div class="instr-s">${body}</div>
+    <div class="illo-frame">${graphic}</div></div>`;
+}
+
+/* ============================ field builders ============================ */
+function fieldSelect(icon,label,help,id,options,val){
+  return `<div class="frow"><div class="fic">${I(icon,22)}</div>
+    <div class="flabel"><div class="l">${label}</div>${help?`<div class="h">${help}</div>`:''}</div>
+    <div class="fctl"><select id="${id}">${opt(options,val,{'':'Select…'})}</select></div></div>`;
+}
+function fieldSeg(icon,label,help,id,options,val){
+  return `<div class="frow"><div class="fic">${I(icon,22)}</div>
+    <div class="flabel"><div class="l">${label}</div>${help?`<div class="h">${help}</div>`:''}</div>
+    <div class="fctl"><div class="seg" id="${id}">${options.map(o=>`<button data-v="${o}" class="${val===o?'on':''}">${o}</button>`).join('')}</div></div></div>`;
+}
+function fieldNumber(icon,label,help,id,val,min,max){
+  return `<div class="frow"><div class="fic">${I(icon,22)}</div>
+    <div class="flabel"><div class="l">${label}</div>${help?`<div class="h">${help}</div>`:''}</div>
+    <div class="fctl"><input id="${id}" type="number" min="${min}" max="${max}" value="${val||''}" style="width:96px;text-align:center"></div></div>`;
+}
+/* stacked: chart glyph + label on top, full-width line dropdown below, eye colour-coded */
+function fieldEyeLine(label,id,val,eye){
+  const badge = eye==='r'?'<span class="eyebadge eye-r">R</span>'
+    : eye==='l'?'<span class="eyebadge eye-l">L</span>'
+    : '<span class="bothchip">Both eyes</span>';
+  return `<div class="vfield">
+    <div class="vhead"><div class="fic">${chartGlyph()}</div><div class="l">${label}</div>${badge}</div>
+    <div class="vctl"><select id="${id}" class="full">${opt(LINE_OPTS.map(n=>n),val,{'':'Choose line…'},'Line ')}</select></div>
+  </div>`;
+}
+/* stacked: label on top, full-width 0–4 scale below (no more overlap) */
+function fieldLetters(label,id,val){
+  return `<div class="vfield">
+    <div class="vhead"><div class="fic">${I('clipboard',22)}</div><div class="l">${label}</div></div>
+    <div class="vctl"><div class="seg full" id="${id}-seg">${[0,1,2,3,4].map(n=>`<button data-v="${n}" class="${val===n?'on':''}" onclick="pickLetters('${id}',${n},this)">${n}</button>`).join('')}</div>
+    <input type="hidden" id="${id}" value="${val||0}"></div>
+  </div>`;
+}
+function pickLetters(id,n,el){
+  [...el.parentElement.children].forEach(b=>b.classList.remove('on')); el.classList.add('on');
+  const inp=document.getElementById(id); inp.value=n; inp.dispatchEvent(new Event('change'));
+}
+function fieldReadout(label,id,val){
+  return `<div class="resultbar">
+    <div class="rl"><span class="lab">${I('check',16,'#1cc3d6')} ${label}</span><span class="sub">Automatic Snellen result</span></div>
+    <div class="readout" id="${id}">${val}</div></div>`;
+}
+/* read-only review fields used on the Paddle/summary screen (faithful to hi-fi screen 2) */
+function roFieldSelect(icon,label,id,options,val){
+  return `<div class="frow"><div class="fic">${icon==='E'?'<span style="font-weight:800;font-size:20px">E</span>':I(icon,22)}</div>
+    <div class="flabel"><div class="l">${label}</div></div>
+    <div class="fctl"><select disabled>${opt(options,val,{'':'—'})}</select></div></div>`;
+}
+function roFieldSeg(icon,label,options,val,info){
+  return `<div class="frow"><div class="fic">${I(icon,22)}</div>
+    <div class="flabel"><div class="l">${label} ${info?I('info',16,'#a7add9'):''}</div></div>
+    <div class="fctl"><div class="seg">${options.map(o=>`<button class="${val===o?'on':''}" disabled>${o}</button>`).join('')}</div></div></div>`;
+}
+function roEyePair(icon,label,help,rVal,lVal){
+  const cell=(eye,v)=>`<div class="eyectl"><span class="eyebadge ${eye==='R'?'eye-r':'eye-l'}">${eye}</span>
+    <select disabled style="width:78px">${opt([v],v)}</select></div>`;
+  return `<div class="frow"><div class="fic">${I(icon,22)}</div>
+    <div class="flabel"><div class="l">${label} <span style="color:var(--dim);font-weight:600;font-size:13px">${help.split('·')[0]}</span></div><div class="h">${help.split('·')[1]||''}</div></div>
+    <div class="fctl">${cell('R',rVal)}${cell('L',lVal)}</div></div>`;
+}
+function rxCell(k,v){return `<div class="rxcell"><div class="k">${k}</div><div class="v">${v}</div></div>`;}
+function sumRow(icon,col,a,b,va,vb,vc){
+  return `<div class="sumrow">
+    <div class="ic" style="background:${col};width:46px;height:46px">${I(icon,24)}</div>
+    <div class="txt"><div class="a">${a}</div><div class="b">${b}</div></div>
+    <div class="val"><div class="a" style="color:${vc}">${va}</div><div class="b">${vb}</div></div></div>`;
+}
+function opt(arr,val,labels={},prefix=''){
+  return arr.map(o=>{
+    const v=String(o); const lbl=labels[v]!==undefined?labels[v]:(prefix+v);
+    return `<option value="${v}" ${String(val)===v?'selected':''}>${lbl}</option>`;
+  }).join('');
+}
+
+/* segmented control wiring */
+function wireSeg(id,cb){
+  const seg=$('#'+id); if(!seg)return;
+  seg.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+    seg.querySelectorAll('button').forEach(x=>x.classList.remove('on')); b.classList.add('on');
+    if(cb)cb(b.dataset.v);
+  });
+}
+function segVal(id){const on=$('#'+id+' .on');return on?on.dataset.v:null;}
+
+/* stepper (Distance / Wheel / Paddle / Dispense)
+   Strictly position-based: a step can NEVER show complete ahead of the current step.
+   Only steps before `current` get a check; `current` shows its icon; later steps are locked. */
+function stepper(current, s){
+  const icons={Distance:'glasses',Wheel:'wheel',Paddle:'paddle',Dispense:'glasses'};
+  const idx = STEPPER.indexOf(current);
+  let html='<div class="stepper">';
+  html += `<div class="stepline ${idx>=1?'':'muted'}" style="left:14%;width:24%"></div>`;
+  html += `<div class="stepline ${idx>=2?'':'muted'}" style="left:38.5%;width:24%"></div>`;
+  html += `<div class="stepline ${idx>=3?'':'muted'}" style="left:63%;width:24%"></div>`;
+  STEPPER.forEach((st,i)=>{
+    let cls='step', inner;
+    if(i < idx){ cls+=' done';    inner=I('check',26); }
+    else if(i===idx){ cls+=' current'; inner=I(icons[st],24,'#fff'); }
+    else { cls+=' locked'; inner=I(icons[st],24,'#7c83b4'); }
+    html+=`<div class="${cls}"><div class="circ">${inner}</div><div class="lbl">${st}</div></div>`;
+  });
+  return html+'</div>';
+}
+
+/* advance after a station save: generate QR, route to next or dispense */
+function advance(s){
+  s.time=nowTime();
+  const next=DE.getNextRequiredStep(s);
+  // update path crumb
+  if(!s.path.includes(next)) s.path.push(next);
+  if(!state.queue.includes(s.id)) state.queue.unshift(s.id);
+  showHandoverQR(s.id, ()=>{
+    if(next==='Dispense') go(ScreenDispense);
+    else if(DE.canOpenStep(s,state.role)) routeToStep(s);
+    else go(ScreenHome);
+  });
+}
+
+/* scrim helpers */
+function scrim(inner){ closeScrim(); const d=document.createElement('div'); d.className='scrim'; d.id='scrim'; d.innerHTML=inner;
+  d.addEventListener('click',e=>{ if(e.target===d) closeScrim(); }); document.getElementById('phone').appendChild(d); }
+function closeScrim(){ const d=document.getElementById('scrim'); if(d)d.remove(); }
+
+/* ============================ boot ============================ */
+ScreenSignIn();
+</script>

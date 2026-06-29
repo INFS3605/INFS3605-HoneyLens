@@ -1,0 +1,9 @@
+# Netlify config for a single static HTML site (no build step needed)
+[build]
+  publish = "."
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    Referrer-Policy = "no-referrer"
