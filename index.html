@@ -34,16 +34,16 @@
     background:#0c0e24; color:var(--text);
     display:flex; align-items:center; justify-content:center; min-height:100vh; padding:18px;
   }
-  /* phone frame */
+  /* tablet frame — landscape tablet first (see redesign notes) */
   #phone{
-    width:min(860px,100%); max-width:100%; height:min(980px,96vh);
+    width:min(1180px,97vw); max-width:100%; height:min(800px,94vh); min-height:560px;
     background:radial-gradient(120% 80% at 50% 0%,#23275f 0%,#1a1d4b 46%,#15183c 100%);
     border-radius:20px; position:relative; overflow:hidden;
     box-shadow:var(--shadow), 0 0 0 5px #05060f, 0 0 0 7px #1b1d3a;
   }
   #screen{position:absolute; inset:0; overflow-y:auto; overflow-x:hidden; -webkit-overflow-scrolling:touch}
   #screen::-webkit-scrollbar{width:0}
-  .pad{padding:24px 28px 30px}
+  .pad{padding:24px 28px 30px; max-width:820px; margin:0 auto; width:100%; box-sizing:border-box}
   .pb{padding-bottom:120px}
 
   /* header */
@@ -377,6 +377,84 @@
   .honey-mini-hc{margin:6px auto 12px;display:flex;justify-content:center}
   .honey-tier-badge{display:inline-block;padding:8px 22px;border-radius:999px;font-weight:800;font-size:14px;margin-top:6px}
   .honey-count{font-size:36px;font-weight:800;color:var(--amber);margin:4px 0 2px;line-height:1}
+
+  /* ===== tablet dashboard layout: persistent left sidebar + main area ===== */
+  .tl-wrap{display:flex;align-items:stretch;min-height:100%}
+  .tl-side{width:26%;min-width:238px;max-width:305px;padding:20px 16px 26px;
+    border-right:1px solid var(--border);background:rgba(10,12,40,.28);
+    display:flex;flex-direction:column;gap:14px}
+  .tl-main{flex:1;min-width:0;padding:22px 30px 40px}
+  @media (max-width:840px){
+    .tl-wrap{flex-direction:column}
+    .tl-side{width:100%;max-width:none;border-right:none;border-bottom:1px solid var(--border);
+      flex-direction:row;flex-wrap:wrap;align-items:stretch}
+    .tl-side>*{flex:1;min-width:230px}
+  }
+  .side-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:16px}
+  .tester-avatar{width:54px;height:54px;border-radius:50%;background:var(--chip);
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto;border:2px solid var(--teal)}
+  .tester-name{font-weight:800;font-size:17px}
+  .tester-id{color:var(--dim);font-size:12.5px;margin-top:2px}
+  .station-chip{display:inline-flex;align-items:center;gap:7px;margin-top:12px;
+    background:rgba(28,195,214,.12);border:1px solid rgba(28,195,214,.45);color:var(--teal-2);
+    border-radius:999px;padding:8px 13px;font-weight:800;font-size:13px}
+  .station-chip.none{color:var(--amber);border-color:rgba(245,185,69,.5);background:rgba(245,185,69,.08)}
+  .side-btn{margin-top:12px;width:100%;border:1px solid var(--border-2);background:none;color:#fff;
+    border-radius:11px;padding:12px;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit;
+    display:flex;align-items:center;justify-content:center;gap:8px}
+  .side-btn:active{background:var(--surface-2)}
+  .honey-card{background:linear-gradient(150deg,rgba(245,185,69,.15),rgba(245,185,69,.03));
+    border:1px solid rgba(245,185,69,.4);border-radius:16px;padding:16px}
+  .honey-balance{display:flex;align-items:center;gap:11px;margin-top:11px}
+  .honey-balance .n{font-size:30px;font-weight:800;color:var(--amber);line-height:1}
+  .honey-msg{margin-top:11px;color:var(--dim);font-size:12.5px;line-height:1.5}
+  .hr-line{font-size:12.5px;font-weight:700;margin-top:9px}
+  .hr-line.dim{color:var(--dim);font-weight:600;margin-top:5px}
+  .hr-month{margin-top:11px;padding-top:10px;border-top:1px solid rgba(245,185,69,.25);
+    font-size:12.5px;color:var(--dim);line-height:1.7}
+  /* newly earned honeycomb cell gently fills — subtle, one-shot */
+  .comb-new{animation:cellFill .9s ease;transform-box:fill-box;transform-origin:center}
+  @keyframes cellFill{0%{opacity:.15;transform:scale(.55)}70%{opacity:1;transform:scale(1.07)}100%{opacity:1;transform:scale(1)}}
+
+  /* ===== homepage: three large primary navigation cards ===== */
+  .bignav{display:flex;flex-direction:column;gap:14px;margin-top:20px}
+  .bignav-card{display:flex;align-items:center;gap:18px;text-align:left;width:100%;
+    background:linear-gradient(160deg,var(--teal) 0%,var(--teal-deep) 100%);
+    border:none;border-radius:20px;padding:22px;color:#fff;cursor:pointer;min-height:108px;
+    font-family:inherit;transition:transform .12s,filter .12s}
+  .bignav-card:active{transform:scale(.98);filter:brightness(1.08)}
+  .bignav-card.alt{background:linear-gradient(160deg,#6a5fd0,#4a4fb0)}
+  .bignav-card.fest{background:linear-gradient(160deg,#cf8f2e,#96621e)}
+  .bignav-card.indiv{background:linear-gradient(160deg,#27a98a,#177a62)}
+  .bignav-card[aria-disabled="true"]{opacity:.55;filter:grayscale(.3)}
+  .bignav-card .bn-ic{width:64px;height:64px;border-radius:18px;background:rgba(255,255,255,.16);
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .bignav-card .bn-t{font-size:21px;font-weight:800}
+  .bignav-card .bn-s{font-size:14px;opacity:.94;margin-top:4px}
+
+  /* ===== station selection cards (Eye Festival Mode) ===== */
+  .station-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:18px}
+  @media (max-width:840px){.station-grid{grid-template-columns:repeat(2,1fr)}}
+  .station-card{background:var(--surface);border:2px solid var(--border-2);border-radius:18px;
+    padding:20px 12px;color:#fff;text-align:center;cursor:pointer;min-height:158px;font-family:inherit;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;
+    transition:transform .1s,border-color .1s}
+  .station-card:active{transform:scale(.97)}
+  .station-card.on{border-color:var(--teal-2);background:rgba(28,195,214,.12);
+    box-shadow:0 0 0 3px rgba(28,195,214,.18)}
+  .station-card .st-ic{width:56px;height:56px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .station-card .st-t{font-weight:800;font-size:17px;line-height:1.2}
+  .station-card .st-s{color:var(--dim);font-size:12.5px;line-height:1.35}
+  .station-card.on .st-s{color:#d9f6fb}
+
+  /* station dashboard header */
+  .fest-head{display:flex;align-items:center;gap:14px;background:var(--surface);
+    border:1px solid var(--border);border-radius:18px;padding:16px 18px;margin-top:14px;flex-wrap:wrap}
+
+  /* visible focus states for keyboard users */
+  .bignav-card:focus-visible,.station-card:focus-visible,.action:focus-visible,.btn:focus-visible,
+  .side-btn:focus-visible,.row:focus-visible,.navbtn:focus-visible,.roletag:focus-visible{
+    outline:3px solid var(--teal-2);outline-offset:2px}
 </style>
 
 <div id="phone">
@@ -385,6 +463,7 @@
 
 <script>
 /* ============================ camp configuration ============================ */
+/* PLACEHOLDER clinical mapping — requires OOXii validation before production use */
 const SNELLEN = {1:'6/60',2:'6/48',3:'6/36',4:'6/24',5:'6/18',6:'6/12',7:'6/9',8:'6/7.5',9:'6/6',10:'6/5',11:'6/4'};
 const LINE_OPTS = Object.keys(SNELLEN).map(Number);                 // 1..11
 const PADDLE_POWERS = ['+0.75','+1.00','+1.25','+1.50','+1.75','+2.00','+2.25','+2.50','+3.00'];
@@ -402,6 +481,20 @@ const DEVICES = [
 const FLOW = ['Registration','Distance','Near','Wheel','Paddle','Dispense'];
 const STEPPER = ['Distance','Wheel','Paddle','Dispense']; // shown on data-entry screens (matches hi-fi)
 
+/* tester-selectable stations for Eye Festival Mode.
+   `key` is the internal station name used by STEP_STATION / DE.canOpenStep (unchanged);
+   `label` is the user-facing wording. Near vision has NO station of its own — it stays
+   mapped to Distance via STEP_STATION. 'Exit' is a non-clinical review station for
+   finalised clients only (counselling + send-home); it adds no clinical steps. */
+const STATIONS = [
+  {key:'Registration', label:'Registration',       sub:'New clients & intake',        icon:'clipboard', col:'#6a5fd0'},
+  {key:'Distance',     label:'Distance',           sub:'Distance + near vision',      icon:'glasses',   col:'#2f8fb3'},
+  {key:'Wheel',        label:'Wheel',               sub:'Find the best lens',          icon:'wheel',     col:'#4a4fb0'},
+  {key:'Paddle',       label:'Paddle',              sub:'Preferred reading power',     icon:'paddle',    col:'#7a52c0'},
+  {key:'Dispense',     label:'Dispensing',          sub:'Confirm & give glasses',      icon:'lens',      col:'#27a98a'},
+  {key:'Exit',         label:'Exit / Counselling',  sub:'Finished clients only',       icon:'exit',      col:'#b0762a'},
+];
+
 /* ============================ tiers & badges ============================ */
 const TIERS=[
   {name:'Bronze',   min:0,   max:9,   color:'#cd7f32',light:'#e8a86c',glow:'rgba(205,127,50,.35)'},
@@ -414,15 +507,35 @@ const TIERS=[
 ];
 function getTier(n){return TIERS.find(t=>n>=t.min&&n<=t.max)||TIERS[0];}
 
-const BADGES=[
-  {id:'first',   label:'First Light',    desc:'Completed your first client',      unlocked:n=>n>=1},
-  {id:'five',    label:'High Five',      desc:'Helped 5 clients see clearly',     unlocked:n=>n>=5},
-  {id:'silver',  label:'Silver Wings',   desc:'Reached Silver tier (10 clients)', unlocked:n=>n>=10},
-  {id:'quarter', label:'Quarter Way',    desc:'25 clients — Ruby tier reached',   unlocked:n=>n>=25},
-  {id:'gold',    label:'Gold Standard',  desc:'50 clients — Gold tier reached',   unlocked:n=>n>=50},
-  {id:'century', label:'The Century',    desc:'100 clients — Diamond tier',       unlocked:n=>n>=100},
-  {id:'legend',  label:'Legend',         desc:'200 clients — Sapphire tier',      unlocked:n=>n>=200},
-  {id:'plat',    label:'Platinum Bee',   desc:'500 clients — Platinum tier',      unlocked:n=>n>=500},
+/* ============================ Honey Rewards ============================ */
+/* Participation-only engagement system. Honey is earned for completing workflow
+   tasks, handovers and admin contributions — NEVER for pass/fail results, glasses
+   dispensed, referrals or speed. Badges unlock no clinical privileges. */
+const DAILY_TARGET=60;   // clients that fill today's honeycomb
+const COMB_CELLS=10;     // one hexagon per DAILY_TARGET/COMB_CELLS clients
+const DAILY_MILESTONES=[
+  {n:10, label:'Bronze Honey',   color:'#cd7f32'},
+  {n:25, label:'Silver Honey',   color:'#a8bac8'},
+  {n:40, label:'Gold Honey',     color:'#f5b945'},
+  {n:60, label:'Platinum Honey', color:'#d4d0e8'},
+];
+function dailyBadge(n){ let b=null; for(const m of DAILY_MILESTONES) if(n>=m.n) b=m; return b; }
+function nextDailyMilestone(n){ return DAILY_MILESTONES.find(m=>n<m.n)||null; }
+const MONTHLY_LEVELS=[
+  {n:0,   label:'Bronze Volunteer',   color:'#cd7f32'},
+  {n:100, label:'Silver Volunteer',   color:'#a8bac8'},
+  {n:300, label:'Gold Volunteer',     color:'#f5b945'},
+  {n:800, label:'Platinum Volunteer', color:'#d4d0e8'},
+];
+function monthlyLevel(n){ let l=MONTHLY_LEVELS[0]; for(const m of MONTHLY_LEVELS) if(n>=m.n) l=m; return l; }
+/* participation-only achievement cards (shown on the Profile page) */
+const ACHIEVEMENTS=[
+  {id:'firstfest', label:'First Festival Completed', desc:'Worked your first festival day',   test:st=>st.sessions>=1},
+  {id:'hundred',   label:'100 Clients Supported',    desc:'Helped 100 clients all-time',      test:st=>st.total>=100},
+  {id:'steady',    label:'Consistent Volunteer',     desc:'3 festival days this month',       test:st=>st.sessions>=3},
+  {id:'champion',  label:'Community Champion',       desc:'250 clients supported all-time',   test:st=>st.total>=250},
+  {id:'fivedays',  label:'Five Festival Days',       desc:'5 festival days this month',       test:st=>st.sessions>=5},
+  {id:'fivehund',  label:'500 Clients Supported',    desc:'Helped 500 clients all-time',      test:st=>st.total>=500},
 ];
 
 /* ============================ anonymous id w/ check char ============================ */
@@ -488,14 +601,113 @@ const DE = {
   },
   // station gating: may a device at `role` open this session now?
   canOpenStep(s, role){
-    if(role==='Supervisor') return true;
+    if(role==='Supervisor') return true; // legacy role — no longer selectable in the UI
+    if(role==='Exit') return s.status==='Finalised'; // Exit/Counselling reviews finished clients only (non-clinical)
     const station = STEP_STATION[DE.getNextRequiredStep(s)];
     if(role==='Dispense') return station==='Dispense' || s.status==='Finalised';
     return station===role;
   }
 };
 
+/* ============================ active-station helpers ============================ */
+/* Single source of truth for "which tester station is this device working as" and
+   "may this tester open this client". ALL open paths (QR scan, search, queue rows,
+   direct screen renders, post-save routing) must go through these — never compare
+   stations inline in event handlers. */
+function getActiveTesterStation(){ return state.role || null; }
+/* Individual Testing mode: one tester takes a client through EVERY step themselves
+   (used when festival stations are not running). Station gating is waived, but the
+   decision engine's step ORDER stays fully enforced via guardStep/routeToStep. */
+function isIndividualMode(){ return state.mode==='individual'; }
+function setTesterMode(mode){
+  state.mode = mode==='individual' ? 'individual' : 'festival';
+  try{ localStorage.setItem('hl_mode', state.mode); }catch(e){}
+}
+/* label for "where is this tester working" in headers, search results and the scanner */
+function activeContextLabel(){
+  if(isIndividualMode()) return 'Individual testing';
+  const st=getActiveTesterStation();
+  return st ? stationLabel(st) : 'No station chosen';
+}
+/* ID acceptance for scans/search: correct anonymous format AND (check character valid
+   OR already a known local session — the demo seed IDs predate the check-char rule) */
+function acceptableId(id){
+  return /^[A-Z]\d{2}-[A-Z]$/.test(id||'') && (validId(id) || !!state.sessions[id]);
+}
+function setActiveTesterStation(st){
+  state.role = st || null;
+  const d = DEVICES.find(x=>x.role===st); if(d) state.device = d.id;
+  try{ localStorage.setItem('hl_active_station', st||''); }catch(e){}
+}
+function stationCfg(key){ return STATIONS.find(x=>x.key===key) || null; }
+function stationLabel(key){ const c=stationCfg(key); return c ? c.label : (key||'—'); }
+function stationIcon(key){ const c=stationCfg(key); return c ? c.icon : 'device'; }
+function getRequiredStep(s){ return DE.getNextRequiredStep(s); }
+/* step → permitted station (Near maps to Distance via STEP_STATION);
+   finalised clients belong to Exit / Counselling. */
+function getRequiredStation(s){
+  return s.status==='Finalised' ? 'Exit' : STEP_STATION[DE.getNextRequiredStep(s)];
+}
+function canActiveTesterOpenSession(s){
+  if(!s) return false;
+  if(isIndividualMode()) return true; // no station gate — step order still enforced by guardStep
+  const st = getActiveTesterStation();
+  return !!st && DE.canOpenStep(s, st);
+}
+/* queue entries whose next required station matches the active station */
+function getClientsForActiveStation(){
+  const st = getActiveTesterStation(); if(!st) return [];
+  return state.queue.map(id=>state.sessions[id])
+    .filter(s=>s && canActiveTesterOpenSession(s) && !(st==='Exit' && s.exit && s.exit.done));
+}
+/* clients whose work at the active station is already done (derived from existing
+   DE completion checks — no separate queue data structure exists in this prototype) */
+function getCompletedAtActiveStation(){
+  const st = getActiveTesterStation(); if(!st) return [];
+  const doneHere = s => ({
+    Registration: DE.isIntakeComplete(s),
+    Distance:     DE.isDistanceComplete(s),
+    Wheel:        DE.isWheelComplete(s),
+    Paddle:       DE.isPaddleComplete(s),
+    Dispense:     s.status==='Finalised',
+    Exit:         !!(s.exit && s.exit.done),
+  }[st] || false);
+  return state.queue.map(id=>state.sessions[id]).filter(s=>s && doneHere(s));
+}
+/* the ONLY way any UI path may open a client's workflow screen */
+function openSessionForActiveStation(s){
+  if(!canActiveTesterOpenSession(s)){ showWrongStationModal(s); return false; }
+  state.activeId = s.id;
+  go(()=>routeToStep(s));
+  return true;
+}
+function baseScreen(){
+  if(isIndividualMode()) return ScreenIndividual;
+  return getActiveTesterStation() ? ScreenFestivalDashboard : ScreenHome;
+}
+function backToBase(){ go(baseScreen()); }
+/* central per-screen guard: every clinical screen calls this before rendering.
+   Blocks direct navigation, restored sessions and back-navigation bypasses. */
+function guardStep(step){
+  const s = state.activeId ? state.sessions[state.activeId] : null;
+  if(!s){ go(ScreenHome); return null; }
+  if(!canActiveTesterOpenSession(s)){ go(baseScreen()); showWrongStationModal(s); return null; }
+  if(step==='Dispense' && s.status==='Finalised'){
+    if(getActiveTesterStation()!=='Dispense'){ routeToStep(s); return null; }
+    return s;
+  }
+  if(getRequiredStep(s)!==step){ routeToStep(s); return null; } // right station, wrong screen — auto-correct
+  return s;
+}
+function guardExit(){
+  const s = state.activeId ? state.sessions[state.activeId] : null;
+  if(!s){ go(ScreenHome); return null; }
+  if(s.status!=='Finalised' || !canActiveTesterOpenSession(s)){ go(baseScreen()); showWrongStationModal(s); return null; }
+  return s;
+}
+
 /* ============================ lens recommendation (prototype) ============================ */
+/* PLACEHOLDER lens/prescription logic — requires OOXii validation before production use */
 function buildRx(s){
   // derive from actually-recorded wheel + paddle + distance data
   const w=s.wheel||{}, p=s.paddle||{}, d=s.distance||{};
@@ -538,15 +750,39 @@ function clientContext(s){
 function ctxCell(k,v){return `<div class="rxcell"><div class="k">${k}</div><div class="v">${v||'—'}</div></div>`;}
 
 /* ============================ in-memory state ============================ */
+/* Active station survives a browser refresh via localStorage (sessions stay
+   in-memory only, as before — this prototype has no session persistence). */
+const SAVED_STATION = (()=>{ try{ return localStorage.getItem('hl_active_station'); }catch(e){ return null; } })();
+const SAVED_MODE = (()=>{ try{ return localStorage.getItem('hl_mode'); }catch(e){ return null; } })();
+
+/* Honey Rewards progress — persisted so it survives refreshes.
+   Daily counters reset at the start of each festival day; monthly counters reset
+   at the start of each month; session days accumulate within the month. */
+function todayStr(){ // LOCAL date — a festival day rolls over at local midnight, not UTC
+  const d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function monthStr(){ return todayStr().slice(0,7); }
+function loadHoney(){
+  let h=null; try{ h=JSON.parse(localStorage.getItem('hl_honey')); }catch(e){}
+  if(!h||typeof h!=='object') h={};
+  if(h.day!==todayStr()){ h.day=todayStr(); h.today=0; }            // daily reset
+  if(h.month!==monthStr()){ h.month=monthStr(); h.monthClients=0; h.sessionDays=[]; } // monthly reset
+  h.today=h.today||0; h.monthClients=h.monthClients||0; h.sessionDays=h.sessionDays||[];
+  return h;
+}
+function saveHoney(){ try{ localStorage.setItem('hl_honey', JSON.stringify(state.honey)); }catch(e){} }
 const state = {
   authed:false, remember:true,
-  role:'Supervisor',
+  role: STATIONS.some(x=>x.key===SAVED_STATION) ? SAVED_STATION : null, // active tester station — change only via setActiveTesterStation()
+  mode: SAVED_MODE==='individual' ? 'individual' : 'festival', // 'festival' (station-gated) or 'individual' (one tester, all steps) — change only via setTesterMode()
   device:'DISP-01',
   activeId:null,
   sessions:{},
   queue:[],
   sync:[],
-  tester:{name:'Ana Tupou',email:'ana.t@ooxii.org',role:'Eye Tester',camp:'Port Vila Eye Camp',clientsTotal:3},
+  honey: loadHoney(),
+  tester:{name:'Ana Tupou',email:'ana.t@ooxii.org',testerId:'VT-0417',role:'Eye Tester',camp:'Port Vila Eye Camp',clientsTotal:3,lastHoney:null},
 };
 
 function seed(){
@@ -576,6 +812,8 @@ function seed(){
   state.queue=['A47-K','B12-M','C09-T'];
 }
 seed();
+/* map the restored station to its device id (station gating itself never depends on this) */
+if(state.role){ const d=DEVICES.find(x=>x.role===state.role); if(d) state.device=d.id; }
 
 /* ============================ icons ============================ */
 function I(name,size=24,stroke='#fff'){
@@ -607,6 +845,8 @@ function I(name,size=24,stroke='#fff'){
     device:`<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 18h2"/>`,
     scan:`<path d="M4 8V5a1 1 0 0 1 1-1h3M20 8V5a1 1 0 0 0-1-1h-3M4 16v3a1 1 0 0 0 1 1h3M20 16v3a1 1 0 0 1-1 1h-3M4 12h16"/>`,
     warn:`<path d="M12 3 2 20h20L12 3Z"/><path d="M12 10v4M12 17h.01"/>`,
+    search:`<circle cx="11" cy="11" r="6.5"/><path d="M16 16l5 5"/>`,
+    exit:`<path d="M14 4h5a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1h-5"/><path d="M3 12h11M10 8l4 4-4 4"/>`,
   };
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" ${p}>${map[name]||''}</svg>`;
 }
@@ -624,10 +864,12 @@ function toast(msg,icon='check'){
   setTimeout(()=>t.remove(),2600);
 }
 function header(client){
+  const showCtx = getActiveTesterStation() || isIndividualMode();
   return `<div class="topbar">
     <div class="logo"><b>oox</b><span class="dots">ii</span></div>
     <div class="offline-wrap">
       <span class="pill"><span class="dot"></span>Offline</span>
+      ${showCtx?`<div class="offline-sub" style="color:var(--teal-2);font-weight:700">You are at: ${activeContextLabel()}</div>`:''}
       ${client?`<div class="client-sub">Client ${client}</div>`:`<div class="offline-sub">Sync later</div>`}
     </div></div>`;
 }
@@ -670,93 +912,131 @@ function doSignIn(){
   state.authed=true; go(ScreenHome);
 }
 
-/* ============================ HOME ============================ */
-function ScreenHome(){
-  const active = state.activeId && state.sessions[state.activeId];
-  const roleBtns = ['Supervisor','Registration','Distance','Wheel','Paddle','Dispense'].map(r=>
-    `<button class="roletag ${state.role===r?'on':''}" onclick="setRole('${r}')">${r}</button>`).join('');
-
-  const devices = DEVICES.map(d=>`
-    <div class="row" onclick="toast('${d.role} • ${d.id} • ${cap(d.status)}','device')">
-      <div class="ic" style="background:${d.col}">${I(d.ic,24)}</div>
-      <div class="grow"><div class="name">${d.role}</div><div class="sub">${d.id}</div></div>
-      <span class="statpill ${pillClass(d.status)}">${d.status==='working'?'<span class="dot" style="background:#4d8bf5;box-shadow:0 0 8px #4d8bf5"></span>':'<span class="dot"></span>'}${cap(d.status)}</span>
-      <span class="chev">${I('chevR',20,'#7c83b4')}</span>
-    </div>`).join('');
-
-  const queue = state.queue.map(id=>{
-    const s=state.sessions[id];
-    return `<div class="row" onclick="openQueueItem('${id}')">
-      <div class="ic" style="background:${s.dir==='in'?'rgba(77,139,245,.18)':'rgba(74,222,128,.14)'};border:1px solid ${s.dir==='in'?'rgba(77,139,245,.5)':'rgba(74,222,128,.4)'}">
-        ${I(s.dir==='in'?'arrowDn':'arrowUp',22,s.dir==='in'?'#4d8bf5':'#4ade80')}</div>
-      <div class="grow">
-        <div class="name">${id}</div>
-        <div class="sub">${s.path.join('  →  ')}</div>
+/* ============================ HOME (tablet dashboard: sidebar + 3 nav cards) ============================ */
+function honeyDropIcon(w=18,h=24,id='dgS'){
+  return `<svg width="${w}" height="${h}" viewBox="0 0 18 24" aria-hidden="true">
+    <defs><radialGradient id="${id}" cx="38%" cy="28%">
+      <stop offset="0%" stop-color="#fde68a"/><stop offset="100%" stop-color="#d97706"/>
+    </radialGradient></defs>
+    <path d="M9 1C9 1 1 10 1 16c0 4.4 3.6 7 8 7s8-2.6 8-7C17 10 9 1 9 1Z" fill="url(#${id})"/></svg>`;
+}
+/* persistent left sidebar: tester profile + Honey Rewards (Today's Progress).
+   Honey rewards participation and handovers only — never clinical outcomes. */
+function sidebar(){
+  const t=state.tester, h=state.honey;
+  const badge=dailyBadge(h.today), next=nextDailyMilestone(h.today);
+  const pct=Math.min(100,Math.round((h.today/DAILY_TARGET)*100));
+  const cellsFilled=Math.min(COMB_CELLS,Math.floor(h.today/(DAILY_TARGET/COMB_CELLS)));
+  const mLevel=monthlyLevel(h.monthClients);
+  const st=getActiveTesterStation();
+  return `<aside class="tl-side" aria-label="Tester profile and Honey Rewards">
+    <div class="side-card">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="tester-avatar">${I('person',26)}</div>
+        <div><div class="tester-name">${t.name}</div><div class="tester-id">Tester ID: ${t.testerId}</div></div>
       </div>
-      <span class="statpill ${pillClass(s.status)}"><span class="dot" style="background:${queueDot(s.status)};box-shadow:0 0 8px ${queueDot(s.status)}"></span>${s.status}</span>
-      <span class="time">${s.time}</span>
-      <span class="chev">${I('chevR',18,'#7c83b4')}</span>
-    </div>`;
-  }).join('');
-
-  const t=state.tester, tier=getTier(t.clientsTotal);
-  screenEl().innerHTML = `<div class="pad pb">
-    ${navBar('home')}
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:18px">
-      <div>
-        <div style="font-size:22px;font-weight:800">Welcome, ${t.name}</div>
+      <div class="station-chip ${(st||isIndividualMode())?'':'none'}">${I(isIndividualMode()?'person':(st?stationIcon(st):'warn'),15,(st||isIndividualMode())?'#1cc3d6':'#f5b945')}
+        ${isIndividualMode()?'Individual testing':(st?stationLabel(st)+' station':'No station chosen')}</div>
+      <button class="side-btn" onclick="go(ScreenFestival)">${I('wheel',16,'#fff')} ${isIndividualMode()?'Festival stations':(st?'Change station':'Choose station')}</button>
+      <div style="margin-top:12px"><span class="pill"><span class="dot"></span>Offline · saved here</span></div>
+      <div class="offline-sub" style="margin-top:8px">Sync queue: ${state.sync.length} waiting</div>
+    </div>
+    <div class="honey-card">
+      <div style="display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px">
+        ${honeyDropIcon(15,20,'dgT')} Today's Progress</div>
+      <div class="honey-balance">
+        ${honeyDropIcon(24,31,'dgB')}
+        <div><div class="n">${h.today}</div><div style="color:var(--dim);font-size:12px">clients helped today</div></div>
+        ${badge?`<span class="tier-badge-sm" style="background:${badge.color};color:#1b1d3a;margin-left:auto">${badge.label}</span>`:''}
+      </div>
+      <div style="margin-top:12px">${honeycombRow(cellsFilled,COMB_CELLS)}</div>
+      <div class="hr-line">${h.today} / ${DAILY_TARGET} clients completed today</div>
+      <div class="hr-line dim">${pct>=100
+        ?'Today’s comb is full — thank you! 🏆'
+        :`You’re ${pct}% of the way to filling today’s honeycomb`}</div>
+      ${next?`<div class="hr-line dim">⬢ ${next.n-h.today} honey until ${next.label}</div>`:''}
+      <div class="hr-month">
+        <b style="color:#fff">This Month</b><br>
+        🍯 ${h.monthClients} client${h.monthClients===1?'':'s'} supported · ${h.sessionDays.length} festival session${h.sessionDays.length===1?'':'s'}<br>
+        <span style="color:${mLevel.color};font-weight:800">${mLevel.label}</span>
+      </div>
+      <div class="honey-msg">${t.lastHoney?('Latest: +1 🍯 '+t.lastHoney):'Honey rewards participation — never test results.'}</div>
+    </div>
+  </aside>`;
+}
+function ScreenHome(){
+  const t=state.tester;
+  const st=getActiveTesterStation();
+  const indiv=isIndividualMode();
+  const regOK = indiv || st==='Registration';
+  screenEl().innerHTML = `<div class="tl-wrap">
+    ${sidebar()}
+    <main class="tl-main">
+      ${navBar('home')}
+      <div style="margin-bottom:4px">
+        <div style="font-size:24px;font-weight:800">Welcome, ${t.name}</div>
         <div style="color:var(--dim);font-size:14px;margin-top:3px">${t.camp}</div>
       </div>
-      <div style="display:flex;align-items:center;gap:10px">
-        <span class="tier-badge-sm" style="background:${tier.color};color:${TIERS.indexOf(tier)<1?'#fff':'#1b1d3a'};margin-top:0">${tier.name}</span>
-        <span class="pill"><span class="dot"></span>Online</span>
+      <div class="bignav">
+        <button class="bignav-card" ${regOK?'':'aria-disabled="true"'} onclick="homeNewClient()">
+          <div class="bn-ic">${I('clipboard',34)}</div>
+          <div><div class="bn-t">New Client</div>
+          <div class="bn-s">${regOK?'Register a new anonymous client':'Done at the Registration station'}</div></div>
+          <span class="chev" style="margin-left:auto">${I('chevR',26,'#fff')}</span>
+        </button>
+        <button class="bignav-card alt" onclick="go(ScreenSearchClient)">
+          <div class="bn-ic">${I('search',34)}</div>
+          <div><div class="bn-t">Search Client</div>
+          <div class="bn-s">Find a client by anonymous ID</div></div>
+          <span class="chev" style="margin-left:auto">${I('chevR',26,'#fff')}</span>
+        </button>
+        <button class="bignav-card fest" onclick="go(ScreenFestival)">
+          <div class="bn-ic">${I('eye',34)}</div>
+          <div><div class="bn-t">Eye Festival Mode</div>
+          <div class="bn-s">${!indiv&&st?'Continue at your '+stationLabel(st)+' station':'Work at one station with other testers'}</div></div>
+          <span class="chev" style="margin-left:auto">${I('chevR',26,'#fff')}</span>
+        </button>
+        <button class="bignav-card indiv" onclick="enterIndividualMode()">
+          <div class="bn-ic">${I('person',34)}</div>
+          <div><div class="bn-t">Individual Testing</div>
+          <div class="bn-s">${indiv?'Continue — you are in individual mode':'One tester does every step, in order'}</div></div>
+          <span class="chev" style="margin-left:auto">${I('chevR',26,'#fff')}</span>
+        </button>
       </div>
-    </div>
-
-    <div class="rolebar">
-      <span class="lbl">This device acts as:</span>${roleBtns}
-    </div>
-
-    <div class="actions">
-      <button class="action" onclick="openScanner()">
-        ${I('qr',46)}<div class="t">Scan client QR</div><div class="s">Continue a client</div></button>
-      <button class="action" ${active?'':'disabled'} onclick="${active?`showHandoverQR('${state.activeId}')`:''}">
-        ${I('qrshow',46)}<div class="t">Show handover QR</div><div class="s">${active?'Client '+state.activeId:'Share client progress'}</div></button>
-    </div>
-
-    <div class="sec"><h2>Active devices</h2><span class="meta">5 devices ${I('device',18,'#1cc3d6')}</span></div>
-    ${devices}
-
-    <div class="sec"><h2>Handover queue</h2><span class="meta">${state.queue.length} items</span></div>
-    ${queue || `<div class="card" style="padding:20px;text-align:center;color:var(--dim)">No clients yet. Tap “Scan client QR” or start a new client below.</div>`}
-
-    <button class="btn btn-secondary" style="margin-top:14px" onclick="startNewClient()">+ New client</button>
-    <button class="btn btn-secondary" onclick="go(ScreenSync)">Sync queue (${state.sync.length})</button>
-
-    ${privacy()}
+      ${privacy()}
+    </main>
   </div>`;
+}
+/* New Client card — still passes station validation (Registration station or Individual mode) */
+function homeNewClient(){
+  if(!isIndividualMode() && getActiveTesterStation()!=='Registration'){
+    showWrongStationModal(null,'Registration','New clients are registered at the Registration station.');
+    return;
+  }
+  startNewClient();
 }
 function queueDot(s){ return ({Ready:'#4ade80',Received:'#4d8bf5',Waiting:'#f5b945',Blocked:'#f06a7a',Conflict:'#f06a7a'})[s]||'#4ade80'; }
 function cap(x){return x.charAt(0).toUpperCase()+x.slice(1);}
-function setRole(r){ state.role=r; go(ScreenHome); }
 
-/* gated open from queue */
-function openQueueItem(id){
-  const s=state.sessions[id];
-  if(!DE.canOpenStep(s,state.role)){
-    const next=DE.getNextRequiredStep(s);
-    showBlock(next); return;
-  }
-  state.activeId=id;
-  routeToStep(s);
-}
+/* gated open from any queue row or search result — always via the central helper */
+function openSessionById(id){ const s=state.sessions[id]; if(s) openSessionForActiveStation(s); }
 function routeToStep(s){
-  const next = s.status==='Finalised' ? 'Dispense' : DE.getNextRequiredStep(s);
+  if(s.status==='Finalised'){
+    // individual mode has no Dispense station to hold the client — go straight to exit review
+    (isIndividualMode() || getActiveTesterStation()==='Exit' ? ScreenExit : ScreenDispense)(); return;
+  }
+  const next = DE.getNextRequiredStep(s);
   ({Registration:ScreenIntake, Distance:ScreenDistance, Near:ScreenNear, Wheel:ScreenWheel, Paddle:ScreenPaddle, Dispense:ScreenDispense}[next]||ScreenDispense)();
 }
 
 /* ============================ NEW CLIENT INTAKE ============================ */
 function startNewClient(){
+  // station validation — registration happens at the Registration station,
+  // or anywhere in Individual Testing mode (registration is the first step of the sequence)
+  if(!isIndividualMode() && getActiveTesterStation()!=='Registration'){
+    showWrongStationModal(null,'Registration','New clients are registered at the Registration station.');
+    return;
+  }
   const id=newAnonId();
   state.sessions[id]={id,status:'Draft',dir:'out',time:nowTime(),path:['Registration'],version:1,
     intake:{sessionType:'Individual'},distance:null,near:null,wheel:null,paddle:null,dispense:null};
@@ -766,10 +1046,11 @@ function startNewClient(){
 function nowTime(){const d=new Date();return d.toTimeString().slice(0,5);}
 
 function ScreenIntake(){
-  const s=state.sessions[state.activeId]; const k=s.intake;
+  const s=guardStep('Registration'); if(!s) return;
+  const k=s.intake;
   screenEl().innerHTML=`<div class="pad pb">
     ${header(s.id)}
-    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Works without internet</div><div class="s">Saved on this device</div></div></div>
 
     <div class="card" style="padding:16px;margin-bottom:14px;display:flex;align-items:center;gap:12px">
@@ -810,16 +1091,16 @@ function saveIntake(){
   if(!s.intake.ageBand||!s.intake.gender||!s.intake.village||!s.intake.cataract){ toast('Complete all required fields','warn'); return; }
   s.status='In Progress'; s.path=['Registration','Distance']; s.dir='out'; s.time=nowTime(); s.version++;
   if(!state.queue.includes(s.id)) state.queue.unshift(s.id);
-  state.tester.clientsTotal++;
-  showHandoverQR(s.id, ()=>showHoneyDrop('Registration complete',()=>go(ScreenDistance)));
+  finishStationTask(s,'Registration complete');
 }
 
 /* ============================ DISTANCE ============================ */
 function ScreenDistance(){
-  const s=state.sessions[state.activeId]; const d=s.distance||(s.distance={hasGlasses:null});
+  const s=guardStep('Distance'); if(!s) return;
+  const d=s.distance||(s.distance={hasGlasses:null});
   screenEl().innerHTML=`<div class="pad pb">
     ${header(s.id)}
-    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Distance', s)}
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Works without internet</div><div class="s">Saved on this device</div></div></div>
 
@@ -866,10 +1147,11 @@ function saveDistance(){
 
 /* ============================ NEAR ============================ */
 function ScreenNear(){
-  const s=state.sessions[state.activeId]; const n=s.near||(s.near={hasGlasses:null});
+  const s=guardStep('Near'); if(!s) return;
+  const n=s.near||(s.near={hasGlasses:null});
   screenEl().innerHTML=`<div class="pad pb">
     ${header(s.id)}
-    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Distance', s)}
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Near vision screening</div><div class="s">Saved on this device</div></div></div>
 
@@ -900,10 +1182,11 @@ function saveNear(){
 
 /* ============================ WHEEL ============================ */
 function ScreenWheel(){
-  const s=state.sessions[state.activeId]; const w=s.wheel||(s.wheel={});
+  const s=guardStep('Wheel'); if(!s) return;
+  const w=s.wheel||(s.wheel={});
   screenEl().innerHTML=`<div class="pad pb">
     ${header(s.id)}
-    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Wheel', s)}
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Wheel test · to improve distance vision</div><div class="s">Saved on this device</div></div></div>
 
@@ -944,10 +1227,11 @@ function saveWheel(){
 
 /* ============================ PADDLE — single purpose: preferred reading power ============================ */
 function ScreenPaddle(){
-  const s=state.sessions[state.activeId]; const p=s.paddle||(s.paddle={});
+  const s=guardStep('Paddle'); if(!s) return;
+  const p=s.paddle||(s.paddle={});
   screenEl().innerHTML=`<div class="pad pb">
     ${header(s.id)}
-    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Paddle', s)}
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Paddle test · preferred reading power</div><div class="s">Saved on this device</div></div></div>
 
@@ -978,14 +1262,15 @@ function savePaddle(){
 
 /* ============================ DISPENSE (faithful to hi-fi screen 3) ============================ */
 function ScreenDispense(){
-  const s=state.sessions[state.activeId];
+  const s=guardStep('Dispense'); if(!s) return;
+  // belt-and-braces: never render dispense before required testing is complete
   if(!DE.canDispense(s) && s.status!=='Finalised'){
-    const next=DE.getNextRequiredStep(s); showBlock(next); return;
+    go(baseScreen()); showWrongStationModal(s); return;
   }
   const rx=buildRx(s); const finalised=s.status==='Finalised';
   screenEl().innerHTML=`<div class="pad pb">
     ${header(s.id)}
-    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Camp home</button>
+    <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Dispense', s)}
 
     <div class="statusblock">
@@ -1039,9 +1324,11 @@ function confirmGlasses(){
   const s=state.sessions[state.activeId];
   s.dispense={glassesDispensed:true,status:'Given',dispensedAt:nowTime()};
   s.status='Finalised'; s.version++;
-  state.tester.clientsTotal++;
+  // honey rewards completing the dispensing station's workflow task,
+  // not the clinical outcome — the drop is earned whether or not glasses suit
+  const r=awardHoney();
   go(ScreenDispense);
-  setTimeout(()=>showHoneyDrop('Glasses dispensed!'),250);
+  honeyAfterSave(r,'Dispensing task complete');
 }
 function saveForSync(){
   const s=state.sessions[state.activeId];
@@ -1078,35 +1365,348 @@ function simulateSync(){
   setTimeout(()=>{ state.sync.forEach(id=> state.sessions[id].syncStatus='Synced'); go(ScreenSync); toast('All sessions synced'); },1500);
 }
 
-/* ============================ QR SCANNER (simulated) ============================ */
-function openScanner(){
-  const opts=state.queue.map(id=>`<button class="row" style="width:100%;text-align:left" onclick="scanResult('${id}')">
-    <div class="ic sq" style="background:var(--chip)">${I('qr',22)}</div>
-    <div class="grow"><div class="name">${id}</div><div class="sub">Next: ${DE.getNextRequiredStep(state.sessions[id])}</div></div>
-    <span class="chev">${I('chevR',18,'#7c83b4')}</span></button>`).join('');
-  scrim(`<div class="modal" style="max-width:330px">
-    <div class="ic sq" style="background:var(--chip);width:64px;height:64px;margin:0 auto 12px">${I('scan',34,'#1cc3d6')}</div>
-    <h3>Scan client QR</h3>
-    <p>Point the camera at another device's handover QR. (Demo: pick a code below to simulate a scan.)</p>
-    <div style="text-align:left;margin-top:6px">${opts||'<p style="text-align:center">No codes in range.</p>'}</div>
+/* ============================ SEARCH CLIENT (anonymous ID only) ============================ */
+function ScreenSearchClient(){
+  screenEl().innerHTML=`<div class="pad pb">
+    ${navBar('home')}
+    <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
+    <div class="camp"><div class="camp-ic">${I('search',26)}</div>
+      <div><h1>Search Client</h1><p>Anonymous client ID only — like A47-K</p></div></div>
+    <div class="frow" style="margin-top:20px;align-items:flex-start">
+      <div class="fic">${I('qr',22)}</div>
+      <div class="flabel" style="width:100%">
+        <div class="l"><label for="sc-id">Client ID</label></div>
+        <input id="sc-id" class="full" style="margin-top:9px;text-transform:uppercase;font-size:19px;letter-spacing:2px"
+          type="text" maxlength="5" placeholder="A47-K" autocomplete="off" inputmode="text">
+        <div id="sc-err" class="err" style="display:none" role="alert"></div>
+        <div class="h" style="margin-top:7px">Only anonymous IDs work here. No names, no phone numbers.</div>
+      </div>
+    </div>
+    <button class="btn btn-primary" onclick="searchClient()">${I('search',20)} Search</button>
+    <button class="btn btn-secondary" onclick="openScanner()">${I('scan',20,'#fff')} Scan client QR instead</button>
+    <div id="sc-result" style="margin-top:18px"></div>
+    ${privacy('Search accepts anonymous IDs only.')}
+  </div>`;
+  const inp=$('#sc-id');
+  inp.addEventListener('input',()=>{ inp.value=inp.value.toUpperCase(); });
+  inp.addEventListener('keydown',e=>{ if(e.key==='Enter') searchClient(); });
+  inp.focus();
+}
+function searchClient(){
+  const id=$('#sc-id').value.trim().toUpperCase();
+  const err=$('#sc-err'), out=$('#sc-result');
+  err.style.display='none'; out.innerHTML='';
+  if(!acceptableId(id)){ err.style.display='block'; err.textContent='Not a valid anonymous ID. Format: letter, two digits, dash, check letter (A47-K).'; return; }
+  const s=state.sessions[id];
+  if(!s){ err.style.display='block'; err.textContent='No client '+id+' on this device.'; return; }
+  out.innerHTML=searchResultCard(s);
+}
+/* last station whose work is complete, derived from existing DE checks */
+function lastCompletedStation(s){
+  if(s.exit && s.exit.done) return stationLabel('Exit');
+  if(s.status==='Finalised') return stationLabel('Dispense');
+  if(DE.isPaddleComplete(s)) return stationLabel('Paddle');
+  if(DE.isWheelComplete(s))  return stationLabel('Wheel');
+  if(DE.isDistanceComplete(s)) return stationLabel('Distance');
+  if(DE.isIntakeComplete(s)) return stationLabel('Registration');
+  return '—';
+}
+function searchResultCard(s){
+  const req=getRequiredStation(s);
+  const canOpen=canActiveTesterOpenSession(s);
+  const active=getActiveTesterStation();
+  const nextTxt = s.status==='Finalised' ? 'Exit / counselling' : getRequiredStep(s);
+  return `<div class="card" style="padding:18px">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div class="readout" style="font-size:20px;min-width:auto">${s.id}</div>
+      <span class="statpill ${pillClass(s.status)}">${s.status}</span>
+      <span class="time" style="margin-left:auto">Updated ${s.time||'—'}</span>
+    </div>
+    <div class="ctxgrid" style="margin-top:14px">
+      ${ctxCell('Next needed',nextTxt)}
+      ${ctxCell('Go to station',stationLabel(req))}
+      ${ctxCell('Last completed',lastCompletedStation(s))}
+      ${ctxCell('Your station',activeContextLabel())}
+    </div>
+    ${canOpen
+      ?`<button class="btn btn-primary" style="margin-top:16px" onclick="openSessionById('${s.id}')">Open client ${I('arrowR',20)}</button>`
+      :`<div class="notice" style="margin:16px 0 0"><span class="x">${I('warn',20,'#f06a7a')}</span>
+          <div><div class="t">Not for your station</div>
+          <div class="s">This client needs <b style="color:#fff">${stationLabel(req)}</b>. You are working at <b style="color:#fff">${activeContextLabel()}</b>. Please direct the client to ${stationLabel(req)}.</div></div></div>
+        <button class="btn btn-secondary" onclick="go(ScreenFestival)">Change my station</button>`}
+  </div>`;
+}
+
+/* ============================ INDIVIDUAL TESTING MODE ============================ */
+/* For testers working alone (no festival stations running): one tester takes a
+   client through every step themselves. The step ORDER is still fully enforced by
+   the decision engine — distance first, no dispensing before testing is complete. */
+function enterIndividualMode(){
+  if(isIndividualMode()){ go(ScreenIndividual); return; }
+  scrim(`<div class="modal">
+    <div class="ic sq" style="background:rgba(39,169,138,.16);border:1px solid rgba(39,169,138,.5);width:60px;height:60px;margin:0 auto 12px">${I('person',30,'#4ade80')}</div>
+    <h3>Individual testing?</h3>
+    <p>You will do <b style="color:#fff">every step yourself</b>, one client at a time, in the set order:<br><br>
+    Registration → Distance (+ Near) → Wheel → Paddle → Dispensing.<br><br>
+    Steps can never be skipped. Festival stations are not used.</p>
+    <button class="btn btn-primary" onclick="confirmIndividualMode()">Start individual testing</button>
     <button class="btn btn-secondary" onclick="closeScrim()">Cancel</button>
   </div>`);
 }
-function scanResult(id){
+function confirmIndividualMode(){
   closeScrim();
-  const s=state.sessions[id];
-  if(!DE.canOpenStep(s,state.role)){ showBlock(DE.getNextRequiredStep(s)); return; }
-  state.activeId=id; routeToStep(s);
+  setTesterMode('individual');
+  toast('Individual testing mode on');
+  go(ScreenIndividual);
+}
+function ScreenIndividual(){
+  if(!isIndividualMode()){ go(ScreenHome); return; }
+  const t=state.tester;
+  const clients=state.queue.map(id=>state.sessions[id]).filter(Boolean);
+  const rows=clients.map(s=>{
+    const finished=!!(s.exit&&s.exit.done);
+    const nextTxt=s.status==='Finalised'?(finished?'Finished':'Exit / counselling'):getRequiredStep(s);
+    return `<div class="row" ${finished?'style="cursor:default;opacity:.6"':`onclick="openSessionById('${s.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')openSessionById('${s.id}')"`}>
+      <div class="ic" style="background:${finished?'var(--chip)':'rgba(74,222,128,.14)'};border:1px solid ${finished?'transparent':'rgba(74,222,128,.4)'}">${I(finished?'check':'arrowDn',22,'#4ade80')}</div>
+      <div class="grow"><div class="name">${s.id}</div><div class="sub">${finished?'All done':'Next: '+nextTxt}</div></div>
+      <span class="statpill ${pillClass(s.status)}">${s.status}</span>
+      <span class="time">${s.time||''}</span>
+      ${finished?'':`<span class="chev">${I('chevR',18,'#7c83b4')}</span>`}
+    </div>`;
+  }).join('');
+  screenEl().innerHTML=`<div class="tl-wrap">
+    ${sidebar()}
+    <main class="tl-main">
+      ${navBar('home')}
+      <div class="fest-head">
+        <div class="ic" style="background:#27a98a;width:54px;height:54px">${I('person',26)}</div>
+        <div class="grow"><div style="font-weight:800;font-size:21px">Individual testing</div>
+          <div style="color:var(--dim);font-size:13.5px;margin-top:2px">${t.name} · ${t.testerId} · one client, every step, in order</div></div>
+        <button class="side-btn" style="margin-top:0;width:auto;padding:11px 15px" onclick="go(ScreenFestival)">Festival stations</button>
+      </div>
+      <div class="actions" style="margin-top:16px">
+        <button class="action" onclick="startNewClient()">
+          ${I('clipboard',44)}<div class="t">New client</div><div class="s">Register &amp; start testing</div></button>
+        <button class="action" style="background:linear-gradient(160deg,#6a5fd0,#4a4fb0)" onclick="openScanner()">
+          ${I('qr',44)}<div class="t">Scan client QR</div><div class="s">Continue a client</div></button>
+      </div>
+      <button class="btn btn-secondary" onclick="go(ScreenSearchClient)">${I('search',20,'#fff')} Search client by ID</button>
+      <div class="sec"><h2>Your clients</h2><span class="meta">${clients.length} client${clients.length===1?'':'s'}</span></div>
+      ${rows||`<div class="card" style="padding:20px;text-align:center;color:var(--dim)">No clients yet. Tap “New client” to start.</div>`}
+      <button class="btn btn-secondary" onclick="go(ScreenHome)">${I('home',20,'#fff')} Return home</button>
+    </main>
+  </div>`;
+}
+
+/* ============================ EYE FESTIVAL MODE — station selection ============================ */
+function ScreenFestival(){
+  const active=getActiveTesterStation();
+  const cards=STATIONS.map(st=>`
+    <button class="station-card ${active===st.key?'on':''}" onclick="pickStation('${st.key}')"
+      aria-pressed="${active===st.key}" aria-label="Work at the ${st.label} station">
+      <div class="st-ic" style="background:${st.col}">${I(st.icon,28)}</div>
+      <div class="st-t">${st.label}</div>
+      <div class="st-s">${st.sub}</div>
+      ${active===st.key?`<span class="statpill s-ready"><span class="dot"></span>Your station</span>`:''}
+    </button>`).join('');
+  screenEl().innerHTML=`<div class="pad pb">
+    ${navBar('festival')}
+    <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Home</button>
+    <div class="camp"><div class="camp-ic">${I('eye',26)}</div>
+      <div><h1>Eye Festival Mode</h1>
+      <p>${isIndividualMode()?'You are in individual testing. Pick a station to join the festival flow.':(active?'You are at '+stationLabel(active)+'. Continue, or tap another station to change.':'Which station are you working at today?')}</p></div></div>
+    <div class="station-grid">${cards}</div>
+    ${active?`<button class="btn btn-primary" style="margin-top:18px" onclick="go(ScreenFestivalDashboard)">Continue at ${stationLabel(active)} ${I('arrowR',20)}</button>`:''}
+    <div class="hint">Near vision is tested at the Distance station — it has no station of its own.</div>
+  </div>`;
+}
+function pickStation(key){
+  const old=getActiveTesterStation();
+  if(isIndividualMode()){
+    scrim(`<div class="modal">
+      <div class="ic sq" style="background:var(--chip);width:60px;height:60px;margin:0 auto 12px">${I('wheel',30,'#1cc3d6')}</div>
+      <h3>Leave individual testing?</h3>
+      <p>From <b style="color:#fff">Individual testing</b><br>to the <b style="color:#1cc3d6">${stationLabel(key)}</b> station.<br><br>Station rules will apply again. Client records are not changed.</p>
+      <button class="btn btn-primary" onclick="confirmStationChange('${key}')">Yes, work at ${stationLabel(key)}</button>
+      <button class="btn btn-secondary" onclick="closeScrim()">Cancel</button>
+    </div>`);
+    return;
+  }
+  if(old===key){ go(ScreenFestivalDashboard); return; }
+  if(!old){
+    setActiveTesterStation(key);
+    toast('Station set: '+stationLabel(key));
+    go(ScreenFestivalDashboard); return;
+  }
+  scrim(`<div class="modal">
+    <div class="ic sq" style="background:var(--chip);width:60px;height:60px;margin:0 auto 12px">${I('wheel',30,'#1cc3d6')}</div>
+    <h3>Change station?</h3>
+    <p>From <b style="color:#fff">${stationLabel(old)}</b><br>to <b style="color:#1cc3d6">${stationLabel(key)}</b><br><br>Client records are not changed. Your queue will refresh.</p>
+    <button class="btn btn-primary" onclick="confirmStationChange('${key}')">Yes, change station</button>
+    <button class="btn btn-secondary" onclick="closeScrim()">Cancel</button>
+  </div>`);
+}
+function confirmStationChange(key){
+  closeScrim();
+  setTesterMode('festival');
+  setActiveTesterStation(key);
+  toast('Station changed: '+stationLabel(key));
+  go(ScreenFestivalDashboard);
+}
+
+/* ============================ EYE FESTIVAL MODE — station dashboard ============================ */
+function ScreenFestivalDashboard(){
+  if(isIndividualMode()){ go(ScreenIndividual); return; }
+  const st=getActiveTesterStation();
+  if(!st){ go(ScreenFestival); return; }
+  const stCfg=stationCfg(st), t=state.tester;
+  const ready=getClientsForActiveStation();
+  const done=getCompletedAtActiveStation();
+  const readyRows=ready.map(s=>`
+    <div class="row" onclick="openSessionById('${s.id}')" role="button" tabindex="0"
+      onkeydown="if(event.key==='Enter')openSessionById('${s.id}')">
+      <div class="ic" style="background:rgba(74,222,128,.14);border:1px solid rgba(74,222,128,.4)">${I('arrowDn',22,'#4ade80')}</div>
+      <div class="grow"><div class="name">${s.id}</div>
+        <div class="sub">Needs: ${s.status==='Finalised'?'Exit / counselling':getRequiredStep(s)}</div></div>
+      <span class="statpill ${pillClass(s.status)}"><span class="dot" style="background:${queueDot(s.status)}"></span>${s.status}</span>
+      <span class="time">${s.time||''}</span>
+      <span class="chev">${I('chevR',18,'#7c83b4')}</span>
+    </div>`).join('');
+  const doneRows=done.map(s=>`
+    <div class="row" style="cursor:default">
+      <div class="ic" style="background:var(--chip)">${I('check',22,'#4ade80')}</div>
+      <div class="grow"><div class="name">${s.id}</div>
+        <div class="sub">${s.status==='Finalised'&&st!=='Exit'&&st!=='Dispense'?'Finished':('Now needs: '+stationLabel(getRequiredStation(s)))}</div></div>
+      <span class="time">${s.time||''}</span>
+    </div>`).join('');
+  screenEl().innerHTML=`<div class="tl-wrap">
+    ${sidebar()}
+    <main class="tl-main">
+      ${navBar('festival')}
+      <div class="fest-head">
+        <div class="ic" style="background:${stCfg.col};width:54px;height:54px">${I(stCfg.icon,26)}</div>
+        <div class="grow"><div style="font-weight:800;font-size:21px">${stCfg.label} station</div>
+          <div style="color:var(--dim);font-size:13.5px;margin-top:2px">
+            ${t.name} · ${t.testerId}${st==='Distance'?' · Near vision is also tested here':''}</div></div>
+        <button class="side-btn" style="margin-top:0;width:auto;padding:11px 15px" onclick="go(ScreenFestival)">Change station</button>
+      </div>
+      <div class="actions" style="margin-top:16px">
+        <button class="action" onclick="openScanner()">
+          ${I('qr',44)}<div class="t">Scan client QR</div><div class="s">Open the next client</div></button>
+        <button class="action" style="background:linear-gradient(160deg,#6a5fd0,#4a4fb0)" onclick="go(ScreenSearchClient)">
+          ${I('search',44)}<div class="t">Search client</div><div class="s">Find by anonymous ID</div></button>
+      </div>
+      <div class="sec"><h2>Ready for you</h2><span class="meta">${ready.length} client${ready.length===1?'':'s'}</span></div>
+      ${readyRows||`<div class="card" style="padding:20px;text-align:center;color:var(--dim)">No clients waiting for ${stCfg.label} right now.</div>`}
+      <div class="sec"><h2>Completed here today</h2><span class="meta">${done.length}</span></div>
+      ${doneRows||`<div class="card" style="padding:20px;text-align:center;color:var(--dim)">Nothing completed at this station yet.</div>`}
+      <button class="btn btn-secondary" onclick="go(ScreenHome)">${I('home',20,'#fff')} Return home</button>
+    </main>
+  </div>`;
+}
+
+/* ============================ EXIT / COUNSELLING (finalised clients only, read-only) ============================ */
+function ScreenExit(){
+  const s=guardExit(); if(!s) return;
+  const rx=buildRx(s); // PLACEHOLDER prescription mapping — requires OOXii validation (display only here)
+  const exitDone=!!(s.exit&&s.exit.done);
+  screenEl().innerHTML=`<div class="pad pb">
+    ${header(s.id)}
+    <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
+    <div class="statusblock">
+      <div class="ok">${I('check',26,'#4ade80')}</div>
+      <div><h2>Exit &amp; counselling</h2><p>Testing is finished for client ${s.id}. Review, advise, and send them home.</p></div>
+    </div>
+    ${clientContext(s)}
+    <div class="card sumcard">
+      <div style="display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;padding:14px 0 4px">
+        Final summary <span class="bothchip">Read-only</span></div>
+      ${sumRow('glasses','#27a98a','Glasses',(s.dispense&&s.dispense.glassesDispensed)?'Dispensed at Dispensing':'Recorded at Dispensing',rx.recType,rx.material,'#fff')}
+      ${sumRow('lens','#1d8aa6','Distance result',rx.distanceLabel,rx.distanceSnellen,'','#1cc3d6')}
+    </div>
+    <div class="instruction">
+      <div class="instr-t">Care advice to give</div>
+      <div class="instr-s">• Clean glasses with water and a soft cloth.<br>• Wear them as advised at the festival.<br>• Come back to any OOXii festival if vision changes.</div>
+    </div>
+  </div>
+  <div class="btn-row">
+    <button class="btn btn-primary" ${exitDone?'disabled':''} onclick="confirmExit()">${I('check',22)} ${exitDone?'Exit complete':'Confirm counselling done'}</button>
+  </div>`;
+}
+function confirmExit(){
+  const s=state.sessions[state.activeId]; if(!s||s.status!=='Finalised') return;
+  s.exit={done:true,time:nowTime()}; s.version++;
+  const r=awardHoney(); // honey: admin/workflow task completion — not outcome-linked
+  honeyAfterSave(r,'Exit & counselling complete',()=>go(baseScreen()));
+}
+
+/* ============================ QR SCANNER (simulated) ============================ */
+function openScanner(){
+  const st=getActiveTesterStation();
+  if(!st && !isIndividualMode()){
+    scrim(`<div class="modal">
+      <div class="ic sq" style="background:var(--chip);width:60px;height:60px;margin:0 auto 12px">${I('scan',30,'#1cc3d6')}</div>
+      <h3>Choose a station first</h3>
+      <p>You need an active station before scanning clients.</p>
+      <button class="btn btn-primary" onclick="closeScrim();go(ScreenFestival)">Choose my station</button>
+      <button class="btn btn-secondary" onclick="closeScrim()">Cancel</button>
+    </div>`);
+    return;
+  }
+  const opts=state.queue.map(id=>{
+    const s=state.sessions[id];
+    const ok=canActiveTesterOpenSession(s);
+    return `<button class="row" style="width:100%;text-align:left" onclick="simulateScan('${id}')">
+      <div class="ic sq" style="background:var(--chip)">${I('qr',22)}</div>
+      <div class="grow"><div class="name">${id}</div><div class="sub">Needs: ${s.status==='Finalised'?'Exit / counselling':DE.getNextRequiredStep(s)}</div></div>
+      <span class="statpill ${ok?'s-ready':'s-needs'}">${ok?'For you':stationLabel(getRequiredStation(s))}</span></button>`;
+  }).join('');
+  scrim(`<div class="modal" style="max-width:360px">
+    <div class="ic sq" style="background:var(--chip);width:64px;height:64px;margin:0 auto 12px">${I('scan',34,'#1cc3d6')}</div>
+    <h3>Scan client QR</h3>
+    <p>You are at: <b style="color:#1cc3d6">${activeContextLabel()}</b><br>Point the camera at a handover QR. (Demo: pick a code below to simulate a scan.)</p>
+    <div style="text-align:left;margin-top:6px;max-height:250px;overflow:auto">${opts||'<p style="text-align:center">No codes in range.</p>'}</div>
+    <button class="btn btn-secondary" onclick="simulateScanRaw('%%damaged-qr%%')">Demo: scan a damaged QR</button>
+    <button class="btn btn-secondary" onclick="closeScrim()">Cancel</button>
+  </div>`);
+}
+/* single source for the handover QR payload (structure unchanged; tid added — backward compatible) */
+function qrPayloadFor(s){
+  return JSON.stringify({
+    v:1, camp:'PVEC-VU', cid:s.id, sid:'uuid-'+s.id,
+    step:DE.getNextRequiredStep(s), status:s.status, ver:s.version, ts:Date.now(),
+    dev:state.device, tid:state.tester.testerId, mac:'sig:'+(s.version*7+s.id.length)
+  });
+}
+function simulateScan(id){ closeScrim(); handleScannedPayload(qrPayloadFor(state.sessions[id])); }
+function simulateScanRaw(raw){ closeScrim(); handleScannedPayload(raw); }
+/* every scan — real or simulated — passes through here:
+   structural validation first, then the central station gate */
+function handleScannedPayload(raw){
+  let p=null;
+  try{ p=JSON.parse(raw); }catch(e){ /* not JSON — treated as damaged below */ }
+  if(!p || p.v!==1 || !p.cid || !acceptableId(p.cid)){
+    showQRError('That QR code is damaged or is not an OOXii client code. Nothing was opened.');
+    return;
+  }
+  const s=state.sessions[p.cid];
+  if(!s){ showQRError('Client '+p.cid+' is not on this device yet. Ask the previous station to show the QR again.'); return; }
+  openSessionForActiveStation(s);
+}
+function showQRError(msg){
+  scrim(`<div class="modal">
+    <div class="ic sq" style="background:rgba(240,106,122,.12);border:1px solid rgba(240,106,122,.4);width:60px;height:60px;margin:0 auto 12px">${I('warn',30,'#f06a7a')}</div>
+    <h3>Cannot read QR</h3>
+    <p>${msg}</p>
+    <button class="btn btn-primary" onclick="closeScrim();openScanner()">${I('scan',20)} Try another scan</button>
+    <button class="btn btn-secondary" onclick="closeScrim()">Close</button>
+  </div>`);
 }
 
 /* ============================ QR HANDOVER MODAL (real QR + fallback) ============================ */
 function showHandoverQR(id, after){
   const s=state.sessions[id];
-  const payload=JSON.stringify({
-    v:1, camp:'PVEC-VU', cid:s.id, sid:'uuid-'+s.id,
-    step:DE.getNextRequiredStep(s), status:s.status, ver:s.version, ts:Date.now(),
-    dev:state.device, mac:'sig:'+(s.version*7+s.id.length)
-  });
+  const payload=qrPayloadFor(s);
   scrim(`<div class="modal">
     <h3>Handover QR</h3>
     <div class="id-big">${s.id}</div>
@@ -1126,14 +1726,21 @@ function showHandoverQR(id, after){
 }
 
 /* ============================ blocking / info modals ============================ */
-function showBlock(nextStep){
-  const station = STEP_STATION[nextStep] || nextStep;
-  const stepNote = (station!==nextStep) ? `${nextStep} (done at the ${station} station)` : nextStep;
+/* Wrong-station modal — the only response to a station mismatch. No clinical form,
+   no override, no continue-anyway. Actions: scan another / change station / home. */
+function showWrongStationModal(s, requiredStation, note){
+  const req = requiredStation || (s ? getRequiredStation(s) : null);
+  const active = getActiveTesterStation();
   scrim(`<div class="modal">
     <div class="ic sq" style="background:rgba(240,106,122,.12);border:1px solid rgba(240,106,122,.4);width:60px;height:60px;margin:0 auto 12px">${I('warn',30,'#f06a7a')}</div>
     <h3>Wrong station</h3>
-    <p>This device is acting as <b style="color:#fff">${state.role}</b>, but the next step for this client is <b style="color:#fff">${stepNote}</b>.<br><br>Please send the client to the <b style="color:#1cc3d6">${station}</b> station.</p>
-    <button class="btn btn-secondary" onclick="closeScrim()">Back to camp home</button>
+    ${s?`<div class="id-big">${s.id}</div>`:''}
+    <p style="font-size:15px;line-height:1.6">This client needs: <b style="color:#1cc3d6">${stationLabel(req)}</b><br>
+      You are working at: <b style="color:#fff">${active?stationLabel(active):'No station chosen'}</b></p>
+    <p>${note||('Please direct the client to the '+stationLabel(req)+' station.')}</p>
+    ${s?`<button class="btn btn-primary" onclick="closeScrim();openScanner()">${I('scan',20)} Scan another client</button>`:''}
+    <button class="btn ${s?'btn-secondary':'btn-primary'}" onclick="closeScrim();go(ScreenFestival)">Change my station</button>
+    <button class="btn btn-secondary" onclick="closeScrim();go(ScreenHome)">Return home</button>
   </div>`);
 }
 function showInfo(){
@@ -1304,21 +1911,46 @@ function stepper(current, s){
   return html+'</div>';
 }
 
-/* advance after a station save: generate QR, route to next or dispense */
+/* ===== Honey Rewards: earning & reward moments =====
+   Honey counts workflow-task completions (registration saved, station test saved,
+   dispensing task done, exit counselling done) — participation only, never outcomes. */
+function awardHoney(){
+  const h=state.honey, prev=dailyBadge(h.today);
+  h.today++; h.monthClients++; state.tester.clientsTotal++;
+  if(!h.sessionDays.includes(h.day)) h.sessionDays.push(h.day); // festival session day counted on first task
+  saveHoney();
+  const badge=dailyBadge(h.today);
+  return {badgeUp: !!badge && badge!==prev, badge};
+}
+/* subtle by design: a quiet toast per task; the one-time animated moment is
+   reserved for daily badge upgrades so testing itself is never interrupted */
+function honeyAfterSave(r,label,after){
+  state.tester.lastHoney=label;
+  toast('+1 🍯 '+label+' · '+state.honey.today+' today');
+  if(r.badgeUp) showHoneyMilestone(r.badge, after);
+  else if(after) after();
+}
+/* complete a station task: count honey, hand over, continue.
+   Individual mode: same tester keeps the client — no device handover, so no QR stop. */
+function finishStationTask(s,label,after){
+  const r=awardHoney();
+  const cont=()=>honeyAfterSave(r,label, after || (()=>afterStationSave(s)));
+  if(isIndividualMode()) cont();
+  else showHandoverQR(s.id, cont);
+}
+
+/* advance after a station save: generate QR, then route ONLY where the active
+   station is permitted — otherwise hand over and return to the station dashboard */
 function advance(s){
   s.time=nowTime();
   const next=DE.getNextRequiredStep(s);
-  const completedStep = DE.getNextRequiredStep({...s, [s._lastSaved]: s[s._lastSaved]}) || next;
   if(!s.path.includes(next)) s.path.push(next);
   if(!state.queue.includes(s.id)) state.queue.unshift(s.id);
-  state.tester.clientsTotal++;
-  showHandoverQR(s.id, ()=>{
-    showHoneyDrop(s._stepLabel||'Step complete', ()=>{
-      if(next==='Dispense') go(ScreenDispense);
-      else if(DE.canOpenStep(s,state.role)) routeToStep(s);
-      else go(ScreenHome);
-    });
-  });
+  finishStationTask(s, s._stepLabel||'Station task complete');
+}
+function afterStationSave(s){
+  if(canActiveTesterOpenSession(s)) routeToStep(s); // e.g. Near follows Distance at the same station
+  else go(baseScreen());
 }
 
 /* scrim helpers */
@@ -1330,6 +1962,7 @@ function closeScrim(){ const d=document.getElementById('scrim'); if(d)d.remove()
 function navBar(active='home'){
   const links=[
     {id:'home',     label:'Home',     icon:'home',   fn:'go(ScreenHome)'},
+    {id:'festival', label:'Festival', icon:'eye',    fn:'go(ScreenFestival)'},
     {id:'profile',  label:'Profile',  icon:'person', fn:'go(ScreenProfile)'},
     {id:'tutorial', label:'Tutorial', icon:'info',   fn:'go(ScreenTutorial)'},
     {id:'settings', label:'Settings', icon:'device', fn:'go(ScreenSettings)'},
@@ -1352,8 +1985,10 @@ function ScreenProfile(){
   const nextTier=TIERS[tierIdx+1]||null;
   const progress=nextTier?Math.round(((t.clientsTotal-tier.min)/(nextTier.min-tier.min))*100):100;
   const cellsFilled=Math.min(t.clientsTotal,18);
-  const unlocked=BADGES.filter(b=>b.unlocked(t.clientsTotal));
-  const locked=BADGES.filter(b=>!b.unlocked(t.clientsTotal));
+  // participation-only achievements (no clinical privileges)
+  const stats={total:t.clientsTotal, sessions:state.honey.sessionDays.length, month:state.honey.monthClients};
+  const unlocked=ACHIEVEMENTS.filter(a=>a.test(stats));
+  const locked=ACHIEVEMENTS.filter(a=>!a.test(stats));
   const badgeHTML=(b,lk)=>`<div class="badge-item ${lk?'locked':''}">
     <div class="badge-icon" style="${lk?'':'background:linear-gradient(135deg,'+tier.color+','+tier.light+')'}">${I(lk?'shield':'check',20,lk?'#4a4f80':'#fff')}</div>
     <div class="badge-label">${b.label}</div>
@@ -1367,7 +2002,7 @@ function ScreenProfile(){
       </div>
       <div class="tier-badge-sm" style="background:${tier.color};color:${tierIdx<1?'#fff':'#1b1d3a'}">${tier.name} Tester</div>
       <div class="profile-name">${t.name}</div>
-      <div class="profile-role">${t.role}</div>
+      <div class="profile-role">${t.role} · ${t.testerId}${getActiveTesterStation()?' · '+stationLabel(getActiveTesterStation())+' station':''}</div>
       <div class="profile-email">${t.email}</div>
       <div class="stats-chips">
         <div class="stat-chip">
@@ -1399,12 +2034,12 @@ function ScreenProfile(){
         <div class="hc-count">${cellsFilled} / 18 cells filled</div>
       </div>
       <div style="margin-top:12px;color:var(--dim);font-size:13px;text-align:center;line-height:1.5">
-        Every registration, handover and dispense fills a cell. Keep going!
+        Every registration, handover and completed station task fills a cell. Keep going!
       </div>
     </div>
 
     <div style="margin-top:26px">
-      <div class="sec"><h2>Achievements</h2><span class="meta">${unlocked.length} / ${BADGES.length} earned</span></div>
+      <div class="sec"><h2>Achievements</h2><span class="meta">${unlocked.length} / ${ACHIEVEMENTS.length} earned</span></div>
       <div class="badge-grid">
         ${[...unlocked.map(b=>badgeHTML(b,false)),...locked.map(b=>badgeHTML(b,true))].join('')}
       </div>
@@ -1447,8 +2082,9 @@ function ScreenTutorial(){
 
 /* ============================ SETTINGS ============================ */
 function ScreenSettings(){
-  const roleBtns=['Supervisor','Registration','Distance','Wheel','Paddle','Dispense'].map(r=>
-    `<button class="roletag ${state.role===r?'on':''}" onclick="setRoleFromSettings('${r}')">${r}</button>`).join('');
+  // station changes always go through pickStation() → confirmation dialog
+  const roleBtns=STATIONS.map(st=>
+    `<button class="roletag ${getActiveTesterStation()===st.key?'on':''}" onclick="pickStation('${st.key}')">${st.label}</button>`).join('');
   const settRow=(icon,label,val)=>`<div class="sumrow">
     <div class="ic" style="background:var(--chip);width:40px;height:40px">${I(icon,20)}</div>
     <div class="txt"><div class="a">${label}</div></div>
@@ -1459,10 +2095,10 @@ function ScreenSettings(){
       <div class="camp-ic">${I('device',26)}</div>
       <div><h1>Settings</h1><p>Device and camp configuration</p></div>
     </div>
-    <div class="sec"><h2>Device role</h2></div>
+    <div class="sec"><h2>Active station</h2></div>
     <div class="card" style="padding:16px 18px">
       <div class="rolebar">${roleBtns}</div>
-      <div style="color:var(--dim);font-size:13px;margin-top:10px">Controls which clients and steps this device can access.</div>
+      <div style="color:var(--dim);font-size:13px;margin-top:10px">Controls which clients this tester can open. Changing asks for confirmation.</div>
     </div>
     <div class="sec"><h2>Camp info</h2></div>
     <div class="card sumcard">
@@ -1480,18 +2116,16 @@ function ScreenSettings(){
     <div class="hint" style="margin-top:20px">OOXii Offline Eye Camp · Prototype v0.1<br>Not for production clinical use.</div>
   </div>`;
 }
-function setRoleFromSettings(r){state.role=r; go(ScreenSettings);}
 
-/* ============================ HONEY DROP POPUP ============================ */
-function showHoneyDrop(label, afterCb){
+/* ============================ HONEY MILESTONE POPUP ============================ */
+/* Shown ONCE per daily badge upgrade (Bronze/Silver/Gold/Platinum Honey) — the only
+   animated reward moment. Everyday task completions get a quiet toast instead, so
+   testing is never interrupted. Badges are recognition only, no clinical privileges. */
+function showHoneyMilestone(badge, afterCb){
   window.__honeyAfter = afterCb||null;
-  const t=state.tester;
-  const tier=getTier(t.clientsTotal);
-  const tierIdx=TIERS.indexOf(tier);
-  const nextTier=TIERS[tierIdx+1]||null;
-  const progress=nextTier?Math.round(((t.clientsTotal-tier.min)/(nextTier.min-tier.min))*100):100;
-  const prevTier=getTier(t.clientsTotal-1);
-  const tierUp=prevTier.name!==tier.name;
+  const h=state.honey;
+  const next=nextDailyMilestone(h.today);
+  const cellsFilled=Math.min(COMB_CELLS,Math.floor(h.today/(DAILY_TARGET/COMB_CELLS)));
   const bee=`<svg width="52" height="46" viewBox="0 0 52 46">
     <ellipse cx="14" cy="16" rx="13" ry="8" fill="rgba(210,235,255,.72)" stroke="rgba(180,220,255,.4)" stroke-width=".8" transform="rotate(-18 14 16)"/>
     <ellipse cx="38" cy="16" rx="13" ry="8" fill="rgba(210,235,255,.60)" stroke="rgba(180,220,255,.4)" stroke-width=".8" transform="rotate(18 38 16)"/>
@@ -1520,17 +2154,34 @@ function showHoneyDrop(label, afterCb){
       <div class="bee-anim">${bee}</div>
       <div class="drop-anim">${drop}</div>
     </div>
-    ${tierUp?`<div style="font-size:12px;font-weight:800;color:${tier.color};letter-spacing:1px;text-transform:uppercase;margin-bottom:4px">✦ New tier unlocked!</div>`:''}
-    <div style="font-size:19px;font-weight:800;margin:2px 0 3px">${label||'Step complete'}</div>
-    <div style="color:var(--dim);font-size:13px;margin-bottom:10px">+1 honey drop earned</div>
-    <div class="honey-mini-hc">${honeycombSVG(Math.min(t.clientsTotal,18),true)}</div>
-    <div class="honey-count">${t.clientsTotal}</div>
-    <div style="color:var(--dim);font-size:12px;margin-bottom:10px">drops collected</div>
-    <div class="honey-tier-badge" style="background:${tier.color};color:${tierIdx<1?'#fff':'#1a1a2e'}">${tier.name} Tester</div>
-    ${nextTier?`<div style="margin:10px 0 6px;font-size:12px;color:var(--dim)">${nextTier.min-t.clientsTotal} more to reach <b style="color:${nextTier.color}">${nextTier.name}</b></div>
-    <div class="tier-track" style="width:100%"><div class="tier-fill" style="width:${progress}%;background:${tier.color}"></div></div>`:''}
+    <div style="font-size:12px;font-weight:800;color:${badge.color};letter-spacing:1px;text-transform:uppercase;margin-bottom:4px">✦ Badge earned!</div>
+    <div class="honey-count">${h.today}</div>
+    <div style="color:var(--dim);font-size:12px;margin-bottom:10px">clients helped today</div>
+    <div class="honey-tier-badge" style="background:${badge.color};color:#1a1a2e">${badge.label}</div>
+    <div class="honey-mini-hc" style="margin-top:12px">${honeycombRow(cellsFilled,COMB_CELLS,true)}</div>
+    ${next?`<div style="margin:8px 0 2px;font-size:12px;color:var(--dim)">⬢ ${next.n-h.today} honey until <b style="color:${next.color}">${next.label}</b></div>`
+          :`<div style="margin:8px 0 2px;font-size:12px;color:var(--amber);font-weight:700">Today's comb is full — thank you! 🏆</div>`}
+    <div style="font-size:11.5px;color:var(--dimmer);margin-top:8px">Badges recognise participation only.</div>
     <button class="btn btn-primary" style="margin-top:14px" onclick="closeScrim();if(window.__honeyAfter){window.__honeyAfter();window.__honeyAfter=null;}">Continue ${I('arrowR',18)}</button>
   </div>`);
+}
+
+/* horizontal honeycomb progress bar — one hexagon per milestone chunk of the day.
+   The most recently earned cell gently fills (subtle, one-shot animation). */
+function honeycombRow(filled,total,mini=false){
+  const R=mini?10:12, W=R*Math.sqrt(3), gap=3;
+  const svgW=Math.ceil(total*(W+gap))+4, svgH=Math.ceil(R*2)+4;
+  const pts=(cx,cy,r)=>Array.from({length:6},(_,i)=>{const a=(60*i-30)*Math.PI/180;return `${(cx+r*Math.cos(a)).toFixed(1)},${(cy+r*Math.sin(a)).toFixed(1)}`;}).join(' ');
+  let cells='';
+  for(let i=0;i<total;i++){
+    const cx=i*(W+gap)+W/2+2, cy=svgH/2;
+    const f=i<filled, isNew=f&&i===filled-1;
+    cells+=`<polygon points="${pts(cx,cy,R-1)}" ${isNew?'class="comb-new"':''}
+      fill="${f?'url(#combg)':'rgba(255,255,255,0.05)'}"
+      stroke="${f?'#c8860a':'rgba(255,255,255,0.18)'}" stroke-width="1.2"/>`;
+  }
+  return `<svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}" style="display:block;margin:0 auto" aria-hidden="true">
+    <defs><radialGradient id="combg" cx="35%" cy="30%"><stop offset="0%" stop-color="#fde68a"/><stop offset="100%" stop-color="#d97706"/></radialGradient></defs>${cells}</svg>`;
 }
 
 /* ============================ HONEYCOMB SVG ============================ */
