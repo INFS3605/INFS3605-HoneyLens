@@ -12,7 +12,23 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>OOXii — Offline Eye Camp</title>
+<!-- QR generation (unchanged from the original prototype) -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<!-- Real camera QR scanning (rear-camera preference, image-upload fallback) -->
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<!-- Supabase JS v2 (browser bundle) -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<!-- Backend config + modules — see BACKEND_IMPLEMENTATION_PLAN.md.
+     js/config.js is gitignored; copy js/config.example.js to create it. -->
+<script src="js/config.example.js"></script>
+<script src="js/config.js" onerror="console.warn('[OOXii] js/config.js not found — copy js/config.example.js and fill in your Supabase project values.')"></script>
+<script src="js/supabase-client.js"></script>
+<script src="js/indexed-db.js"></script>
+<script src="js/auth-service.js"></script>
+<script src="js/session-repository.js"></script>
+<script src="js/sync-service.js"></script>
+<script src="js/qr-service.js"></script>
+<script src="js/backend-adapter.js"></script>
 <style>
   :root{
     --bg-0:#15183c; --bg-1:#1e2157; --bg-2:#262a66;
@@ -276,6 +292,7 @@
   .roletag{font-size:12.5px;font-weight:700;border:1px solid var(--border-2);color:var(--dim);
     background:none;border-radius:999px;padding:6px 11px;cursor:pointer;font-family:inherit}
   .roletag.on{background:var(--teal);border-color:var(--teal);color:#fff}
+  .roletag[disabled]{opacity:.35;cursor:not-allowed}
 
   .hint{color:var(--dimmer);font-size:12.5px;text-align:center;margin-top:16px;line-height:1.5}
   .signin-field{margin-bottom:14px}
@@ -463,9 +480,68 @@
 
 <script>
 /* ============================ camp configuration ============================ */
-/* PLACEHOLDER clinical mapping — requires OOXii validation before production use */
-const SNELLEN = {1:'6/60',2:'6/48',3:'6/36',4:'6/24',5:'6/18',6:'6/12',7:'6/9',8:'6/7.5',9:'6/6',10:'6/5',11:'6/4'};
-const LINE_OPTS = Object.keys(SNELLEN).map(Number);                 // 1..11
+/* AUTHORITATIVE chart conversion table — OOXii walkthrough Appendix A.
+   Chart lines run 0 (top, largest) to 11 (bottom, smallest). Each line has five
+   letters and one 0.1 LogMAR step. Do not edit without an OOXii source. */
+const ACUITY_TABLE = {
+  0:  { logmar: 1.0,  snellenFeet: "20/200", snellenMetres: "6/60" },
+  1:  { logmar: 0.9,  snellenFeet: "20/159", snellenMetres: "6/48" },
+  2:  { logmar: 0.8,  snellenFeet: "20/126", snellenMetres: "6/38" },
+  3:  { logmar: 0.7,  snellenFeet: "20/100", snellenMetres: "6/30" },
+  4:  { logmar: 0.6,  snellenFeet: "20/80",  snellenMetres: "6/24" },
+  5:  { logmar: 0.5,  snellenFeet: "20/63",  snellenMetres: "6/19" },
+  6:  { logmar: 0.4,  snellenFeet: "20/50",  snellenMetres: "6/15" },
+  7:  { logmar: 0.3,  snellenFeet: "20/40",  snellenMetres: "6/12" },
+  8:  { logmar: 0.2,  snellenFeet: "20/32",  snellenMetres: "6/10" },
+  9:  { logmar: 0.1,  snellenFeet: "20/25",  snellenMetres: "6/8" },
+  10: { logmar: 0.0,  snellenFeet: "20/20",  snellenMetres: "6/6" },
+  11: { logmar: -0.1, snellenFeet: "20/16",  snellenMetres: "6/5" }
+};
+const LINE_OPTS = Object.keys(ACUITY_TABLE).map(Number);            // 0..11
+
+/* Clinical thresholds — OOXii walkthrough (binding):
+   Distance: line 7 or better = PASS, line 6 or worse = FAIL.
+   Near:     line 9 or better = PASS, line 8 or worse = FAIL. */
+const DISTANCE_PASS_LINE = 7;
+const NEAR_PASS_LINE = 9;
+
+/* TEMPORARY PROTOTYPE ASSUMPTION: the app records right and left unaided distance
+   results separately, but the supplied source does not define how they combine into
+   one Distance outcome. Under "either_eye_fail", BOTH unaided eyes must reach line 7
+   or better to pass; if EITHER eye is line 6 or worse the overall Distance outcome
+   is fail. Confirm this aggregation rule with OOXii before clinical deployment. */
+const DISTANCE_AGGREGATION_MODE = "either_eye_fail";
+
+/* Paddle age-suggestion table — OOXii walkthrough (approximate guidance only).
+   The ranges 45–49 and 49–52 overlap at age 49: this is NOT silently resolved
+   (age 49 requires tester confirmation). No suggestion exists under age 45.
+   The client's preference always overrides the suggestion. Age NEVER decides
+   whether Paddle is required — only a failed Near test does. */
+const PADDLE_AGE_SUGGESTIONS = [
+  { min:45, max:49, power:'+1.00' },
+  { min:49, max:52, power:'+1.50' },
+  { min:53, max:57, power:'+2.00' },
+  { min:58, max:62, power:'+2.50' },
+  { min:63, max:Infinity, power:'+3.00' },
+];
+/* Registration captures broad age bands, not exact ages. A band only yields a
+   confirmed suggestion when EVERY age in the band maps to one unambiguous power.
+   Otherwise: "No confirmed automatic suggestion. Tester selection required." */
+function suggestPaddlePower(ageBand){
+  const bandRanges={'0–9':[0,9],'10–19':[10,19],'20–34':[20,34],'35–44':[35,44],'45–54':[45,54],'55–64':[55,64],'65+':[65,120]};
+  const r=bandRanges[ageBand];
+  if(!r) return {power:null, note:'No confirmed automatic suggestion. Tester selection required.'};
+  if(r[1]<45) return {power:null, note:'No confirmed automatic suggestion (under 45). Tester selection required.'};
+  const powers=new Set();
+  for(let age=Math.max(r[0],45); age<=Math.min(r[1],120); age++){
+    const hits=PADDLE_AGE_SUGGESTIONS.filter(x=>age>=x.min&&age<=x.max);
+    if(hits.length!==1){ powers.add('ambiguous'); } // includes the unresolved age-49 overlap
+    else powers.add(hits[0].power);
+    if(r[0]<45) powers.add('ambiguous'); // band spans under-45 ages with no suggestion
+  }
+  if(powers.size===1 && !powers.has('ambiguous')) return {power:[...powers][0], note:null};
+  return {power:null, note:'Age band '+ageBand+' spans multiple suggestions (age-49 overlap unresolved). Tester selection required.'};
+}
 const PADDLE_POWERS = ['+0.75','+1.00','+1.25','+1.50','+1.75','+2.00','+2.25','+2.50','+3.00'];
 const LENS_POWERS = (()=>{const a=[];for(let v=-6;v<=6;v+=0.25)a.push((v>=0?'+':'')+v.toFixed(2));return a;})();
 const VILLAGES = ['Port Vila','Mele','Pango','Lelepa','Erakor','Ifira','Eratap','Other (camp area)'];
@@ -554,60 +630,164 @@ function validId(id){
   return !!m && checkChar(m[1],m[2])===m[3];
 }
 
-/* ============================ snellen calculator ============================ */
-// tester picks smallest fully-correct line + letters on next line -> read-only result
-function snellen(line, lettersNext){
-  if(!line) return '—';
-  let s = SNELLEN[line];
-  if(lettersNext>0 && line<11) s += ` +${lettersNext}`;
-  return s;
+/* ============================ LogMAR / acuity calculator ============================ */
+/* Each chart line = 0.1 LogMAR and five letters, so each correctly read letter on
+   the next smaller line subtracts 0.02 (0.1 ÷ 5). LogMAR is system-calculated and
+   never directly editable by the tester. */
+function calculateLogMAR(lineReached, bonusLetters) {
+  // reject missing input explicitly — Number(null)===0 would otherwise be
+  // silently treated as a real "line 0" answer instead of "not answered"
+  if (lineReached==null || lineReached==='' || bonusLetters==null || bonusLetters==='') return null;
+  const line = Number(lineReached);
+  const letters = Number(bonusLetters);
+  if (!Number.isInteger(line) || line < 0 || line > 11) return null;
+  if (!Number.isInteger(letters) || letters < 0 || letters > 4) return null;
+  const base = ACUITY_TABLE[line].logmar;
+  return Number((base - letters * 0.02).toFixed(2));
+}
+/* Five correct letters on the next line = that line is complete: normalise to
+   line+1 with 0 bonus letters rather than recording five bonus letters. */
+function normaliseChartResult(line, letters){
+  if(line==null || line===''){ return null; } // "not answered" — never coerce to line 0
+  let L=Number(line), B=Number(letters)||0;
+  if(!Number.isInteger(L)) return null;
+  while(B>=5 && L<11){ L+=1; B-=5; }
+  if(L===11 && B>4) B=4; // bottom line: cap (no smaller line exists)
+  if(B<0||B>4||L<0||L>11) return null;
+  return {lineReached:L, bonusLetters:B};
+}
+/* read-only display label: LogMAR always shown alongside Snellen (never "+N" alone) */
+function acuityLabel(line, letters){
+  const lm=calculateLogMAR(line, letters);
+  if(lm==null) return '—';
+  const a=ACUITY_TABLE[line];
+  return `${lm.toFixed(2)} LogMAR · ${a.snellenMetres}${letters>0?` +${letters}`:''}`;
+}
+/* build one stored chart-result record (raw values preserved + calculated LogMAR) */
+function chartResult(line, letters){
+  const n=normaliseChartResult(line, letters);
+  if(!n) return null;
+  return {lineReached:n.lineReached, bonusLetters:n.bonusLetters, logmar:calculateLogMAR(n.lineReached,n.bonusLetters)};
 }
 
 /* steps are not all stations: Near vision is performed at the Distance station */
-const STEP_STATION = {Registration:'Registration', Distance:'Distance', Near:'Distance', Wheel:'Wheel', Paddle:'Paddle', Dispense:'Dispense'};
+const STEP_STATION = {Registration:'Registration', Distance:'Distance', Near:'Distance', Wheel:'Wheel', Paddle:'Paddle', Dispense:'Dispense', Exit:'Exit'};
+/* user-facing step wording (single source for queue rows, scanner, search) */
+const STEP_LABELS = {Registration:'Registration', Distance:'Distance test', Near:'Near test', Wheel:'Wheel test', Paddle:'Paddle test', Dispense:'Dispensing', Exit:'Exit / counselling', Complete:'Finished'};
+function stepLabel(step){ return STEP_LABELS[step]||step; }
 
-/* ============================ decision engine ============================ */
+/* ============================ decision engine (OOXii walkthrough) ============================ */
+/* Central outcome + route functions — the ONLY place thresholds live.
+   Screens, buttons, QR handlers and seeds must never re-compare lines. */
+
+/* Distance: line 7 or better = pass, line 6 or worse = fail (line <= 6 fails).
+   Aggregation of right/left unaided eyes uses DISTANCE_AGGREGATION_MODE —
+   a TEMPORARY prototype assumption pending OOXii confirmation (see constant). */
+function getDistanceOutcome(session){
+  const rightLine = Number(session.distance?.rightUnaided?.lineReached);
+  const leftLine  = Number(session.distance?.leftUnaided?.lineReached);
+  if(!Number.isInteger(rightLine) || !Number.isInteger(leftLine)) return null;
+  if(DISTANCE_AGGREGATION_MODE === "either_eye_fail"){
+    return rightLine >= DISTANCE_PASS_LINE && leftLine >= DISTANCE_PASS_LINE ? "pass" : "fail";
+  }
+  return null;
+}
+/* Near: line 9 or better = pass, line 8 or worse = fail. Both eyes, unaided.
+   Age plays NO part in the near outcome or in whether Paddle is required. */
+function getNearOutcome(session){
+  const nearLine = Number(session.near?.unaided?.lineReached);
+  if(!Number.isInteger(nearLine)) return null;
+  return nearLine >= NEAR_PASS_LINE ? "pass" : "fail";
+}
+/* Route is calculated ONLY once both pre-tests are complete — never after
+   Distance alone, and a client is never sent to Wheel before Near. */
+function computeRoute(session){
+  const distance = getDistanceOutcome(session);
+  const near = getNearOutcome(session);
+  if(!distance || !near) return null;
+  if(distance === "pass" && near === "pass") return "none";
+  if(distance === "pass" && near === "fail") return "paddle_only";
+  if(distance === "fail" && near === "pass") return "wheel_only";
+  return "wheel_then_paddle";
+}
+/* required path after the pre-tests, per route */
+const ROUTE_PATHS = {
+  none:              ['Exit'],
+  paddle_only:       ['Paddle','Dispense'],
+  wheel_only:        ['Wheel','Dispense'],
+  wheel_then_paddle: ['Wheel','Paddle','Dispense'],
+};
+/* the terminal step a completed session is reviewed at */
+function terminalStep(s){ return computeRoute(s)==='none' ? 'Exit' : 'Dispense'; }
+
 const DE = {
   isIntakeComplete: s => !!(s.intake && s.intake.ageBand && s.intake.gender && s.intake.village && s.intake.cataract && s.intake.sessionType),
-  isDistanceComplete: s => !!(s.distance && s.distance.rLine && s.distance.lLine && s.distance.hasGlasses!=null),
-  distanceNeedsWheel: s => {
-    if(!s.distance) return false;
-    // worse than 6/12 (line index < 6) in either eye, no own-glasses fix -> wheel
-    return (s.distance.rLine && s.distance.rLine < 6) || (s.distance.lLine && s.distance.lLine < 6);
+  /* both unaided eyes recorded, glasses question answered, and — when the client
+     has own distance glasses — the with-glasses result recorded too */
+  isDistanceComplete: s => !!(s.distance
+    && Number.isInteger(s.distance.rightUnaided?.lineReached)
+    && Number.isInteger(s.distance.leftUnaided?.lineReached)
+    && s.distance.hasGlasses!=null
+    && (!s.distance.hasGlasses || Number.isInteger(s.distance.ownGlasses?.lineReached))),
+  isNearComplete: s => !!(s.near
+    && Number.isInteger(s.near.unaided?.lineReached)
+    && s.near.hasReading!=null
+    && (!s.near.hasReading || Number.isInteger(s.near.ownGlasses?.lineReached))),
+  isWheelComplete: s => {
+    const w=s.wheel; if(!w || !(w.pd>=52 && w.pd<=78)) return false;
+    const eyeDone = e => !!(e && e.lensType
+      && (e.lensType==='Neither' || e.spherePower)
+      && e.colourTestResult && e.canReadLine9OrSmaller!=null && e.visionImproved!=null
+      && (!e.addOnUsed || e.addOnPower)
+      && (!e.toricUsed || (e.toricPower && Number.isInteger(e.toricAxis) && e.toricAxis>=0 && e.toricAxis<=180)));
+    return eyeDone(w.right) && eyeDone(w.left);
   },
-  isNearComplete: s => !!(s.near && s.near.line && s.near.hasGlasses!=null),
-  nearNeedsPaddle: s => {
-    if(!s.intake) return false;
-    const band = s.intake.ageBand;
-    const olderAdd = ['35–44','45–54','55–64','65+'].includes(band);
-    const nearPoor = s.near && s.near.line && s.near.line < 7;
-    return olderAdd || nearPoor;
-  },
-  isWheelComplete: s => !!(s.wheel && s.wheel.pd && s.wheel.rType && s.wheel.lType),
-  isPaddleComplete: s => !!(s.paddle && s.paddle.power),
+  isPaddleComplete: s => !!(s.paddle && s.paddle.selectedPower),
+  isDispenseComplete: s => !!(s.dispense && s.dispense.glassesDispensed!=null),
+  isExitComplete: s => !!(s.exit && s.exit.counsellingDone),
 
+  /* the single state machine: Registration → Distance → Near → route path → Complete */
   getNextRequiredStep(s){
     if(!DE.isIntakeComplete(s)) return 'Registration';
     if(!DE.isDistanceComplete(s)) return 'Distance';
-    if(DE.distanceNeedsWheel(s) && !DE.isWheelComplete(s)) return 'Wheel';
     if(!DE.isNearComplete(s)) return 'Near';
-    if(DE.nearNeedsPaddle(s) && !DE.isPaddleComplete(s)) return 'Paddle';
-    return 'Dispense';
+    const route=computeRoute(s); // non-null: both pre-tests are complete here
+    for(const step of ROUTE_PATHS[route]){
+      if(step==='Wheel'    && !DE.isWheelComplete(s))    return 'Wheel';
+      if(step==='Paddle'   && !DE.isPaddleComplete(s))   return 'Paddle';
+      if(step==='Dispense' && !DE.isDispenseComplete(s)) return 'Dispense';
+      if(step==='Exit'     && !DE.isExitComplete(s))     return 'Exit';
+    }
+    return 'Complete';
   },
+  /* Dispensing gate — route-specific, never available on route "none" */
   canDispense(s){
-    return DE.isIntakeComplete(s) && DE.isDistanceComplete(s) && DE.isNearComplete(s)
-      && (!DE.distanceNeedsWheel(s) || DE.isWheelComplete(s))
-      && (!DE.nearNeedsPaddle(s)   || DE.isPaddleComplete(s));
+    const route=computeRoute(s);
+    if(!route || route==='none') return false;
+    if(route==='paddle_only') return DE.isPaddleComplete(s);
+    if(route==='wheel_only')  return DE.isWheelComplete(s);
+    return DE.isWheelComplete(s) && DE.isPaddleComplete(s); // wheel_then_paddle: both, in order
   },
   // station gating: may a device at `role` open this session now?
   canOpenStep(s, role){
     if(role==='Supervisor') return true; // legacy role — no longer selectable in the UI
-    if(role==='Exit') return s.status==='Finalised'; // Exit/Counselling reviews finished clients only (non-clinical)
-    const station = STEP_STATION[DE.getNextRequiredStep(s)];
-    if(role==='Dispense') return station==='Dispense' || s.status==='Finalised';
-    return station===role;
+    const step = DE.getNextRequiredStep(s);
+    if(step==='Complete') return role===STEP_STATION[terminalStep(s)]; // read-only review only
+    return STEP_STATION[step]===role;
   }
 };
+/* central guards (spec names) — every navigation attempt funnels through these */
+function canEnterStep(s, requestedStep){
+  const next=DE.getNextRequiredStep(s);
+  if(next===requestedStep) return true;
+  return next==='Complete' && requestedStep===terminalStep(s); // completed: read-only review
+}
+function canCompleteStep(s, step){
+  if(!canEnterStep(s,step)) return false;
+  if(step==='Dispense') return DE.canDispense(s);
+  return true;
+}
+function canDispense(s){ return DE.canDispense(s); }
 
 /* ============================ active-station helpers ============================ */
 /* Single source of truth for "which tester station is this device working as" and
@@ -642,11 +822,56 @@ function setActiveTesterStation(st){
 function stationCfg(key){ return STATIONS.find(x=>x.key===key) || null; }
 function stationLabel(key){ const c=stationCfg(key); return c ? c.label : (key||'—'); }
 function stationIcon(key){ const c=stationCfg(key); return c ? c.icon : 'device'; }
+
+/* ============================ real station-assignment enforcement ============================ */
+/* Station keys here (Registration/Distance/Wheel/Paddle/Dispense/Exit) are the
+   SAME identifiers used in STATIONS[].key, STEP_STATION and the database's
+   festival_members.allowed_stations CHECK constraint (see
+   supabase/migrations/001_ooxii_backend.sql) — 'Dispense' is the shared
+   internal key everywhere; 'Dispensing' is only ever a display label. This
+   is what "station names match the database values exactly" means in
+   practice: one identifier, never re-derived or re-typed per screen. */
+function getActiveFestivalMembership(){
+  const ctx = window.OOXII_BACKEND ? window.OOXII_BACKEND.getCachedContext() : null;
+  if(!ctx || !ctx.festivals) return null;
+  return ctx.festivals.find(f=>f.festivalId===ctx.activeFestivalId) || null;
+}
+/* true only when signed in against a real, configured backend (not demo mode) —
+   demo mode has no real roster, so every station stays open, matching its
+   existing "walkable without a backend" purpose. */
+function stationRestrictionActive(){
+  return !!(window.OOXII_CONFIG_VALID && !isDemoModeUrl() && window.OOXII_BACKEND && window.OOXII_BACKEND.getCachedContext());
+}
+/* null = unrestricted (demo/no backend); array = this tester's real allowed_stations
+   for their active festival (possibly empty = no station assignment at all). */
+function allowedStationsForTester(){
+  if(!stationRestrictionActive()) return null;
+  const m = getActiveFestivalMembership();
+  return m ? (m.allowedStations||[]) : [];
+}
+function isStationAllowed(key){
+  const allowed = allowedStationsForTester();
+  return allowed===null || allowed.includes(key);
+}
+/* switching festivals clears the active station — a station assignment is
+   always scoped to one festival, never carried over to another. */
+async function switchActiveFestival(festivalId){
+  const ctx = window.OOXII_BACKEND.getCachedContext();
+  if(!ctx) return;
+  ctx.activeFestivalId = festivalId;
+  window.OOXII_BACKEND.refreshCachedContext(ctx);
+  if(window.OOXII_DB) await window.OOXII_DB.context.set(ctx);
+  const label = (ctx.festivals.find(f=>f.festivalId===festivalId)||{}).festivalName || 'festival';
+  setActiveTesterStation(null);
+  toast('Switched to '+label);
+  go(ScreenFestival);
+}
 function getRequiredStep(s){ return DE.getNextRequiredStep(s); }
-/* step → permitted station (Near maps to Distance via STEP_STATION);
-   finalised clients belong to Exit / Counselling. */
+/* step → permitted station (Near is performed at the Distance station);
+   completed sessions belong to their terminal station for read-only review. */
 function getRequiredStation(s){
-  return s.status==='Finalised' ? 'Exit' : STEP_STATION[DE.getNextRequiredStep(s)];
+  const step=DE.getNextRequiredStep(s);
+  return STEP_STATION[step==='Complete' ? terminalStep(s) : step];
 }
 function canActiveTesterOpenSession(s){
   if(!s) return false;
@@ -658,7 +883,7 @@ function canActiveTesterOpenSession(s){
 function getClientsForActiveStation(){
   const st = getActiveTesterStation(); if(!st) return [];
   return state.queue.map(id=>state.sessions[id])
-    .filter(s=>s && canActiveTesterOpenSession(s) && !(st==='Exit' && s.exit && s.exit.done));
+    .filter(s=>s && canActiveTesterOpenSession(s) && DE.getNextRequiredStep(s)!=='Complete');
 }
 /* clients whose work at the active station is already done (derived from existing
    DE completion checks — no separate queue data structure exists in this prototype) */
@@ -666,11 +891,11 @@ function getCompletedAtActiveStation(){
   const st = getActiveTesterStation(); if(!st) return [];
   const doneHere = s => ({
     Registration: DE.isIntakeComplete(s),
-    Distance:     DE.isDistanceComplete(s),
+    Distance:     DE.isDistanceComplete(s) && DE.isNearComplete(s), // both steps live at this station
     Wheel:        DE.isWheelComplete(s),
     Paddle:       DE.isPaddleComplete(s),
-    Dispense:     s.status==='Finalised',
-    Exit:         !!(s.exit && s.exit.done),
+    Dispense:     DE.isDispenseComplete(s),
+    Exit:         DE.isExitComplete(s),
   }[st] || false);
   return state.queue.map(id=>state.sessions[id]).filter(s=>s && doneHere(s));
 }
@@ -687,47 +912,39 @@ function baseScreen(){
 }
 function backToBase(){ go(baseScreen()); }
 /* central per-screen guard: every clinical screen calls this before rendering.
-   Blocks direct navigation, restored sessions and back-navigation bypasses. */
+   Blocks direct navigation, restored sessions and back-navigation bypasses.
+   Uses canEnterStep() — the single sequence authority — so no screen can open
+   out of clinical order in either Festival or Individual mode. */
 function guardStep(step){
   const s = state.activeId ? state.sessions[state.activeId] : null;
   if(!s){ go(ScreenHome); return null; }
   if(!canActiveTesterOpenSession(s)){ go(baseScreen()); showWrongStationModal(s); return null; }
-  if(step==='Dispense' && s.status==='Finalised'){
-    if(getActiveTesterStation()!=='Dispense'){ routeToStep(s); return null; }
-    return s;
-  }
-  if(getRequiredStep(s)!==step){ routeToStep(s); return null; } // right station, wrong screen — auto-correct
-  return s;
-}
-function guardExit(){
-  const s = state.activeId ? state.sessions[state.activeId] : null;
-  if(!s){ go(ScreenHome); return null; }
-  if(s.status!=='Finalised' || !canActiveTesterOpenSession(s)){ go(baseScreen()); showWrongStationModal(s); return null; }
+  if(!canEnterStep(s, step)){ routeToStep(s); return null; } // auto-correct to the required step
   return s;
 }
 
-/* ============================ lens recommendation (prototype) ============================ */
-/* PLACEHOLDER lens/prescription logic — requires OOXii validation before production use */
-function buildRx(s){
-  // derive from actually-recorded wheel + paddle + distance data
-  const w=s.wheel||{}, p=s.paddle||{}, d=s.distance||{};
-  const sph = (t,pw)=> t==='Minus'? (pw||'-2.50') : t==='Plus'? (pw||'+1.50') : '0.00';
-  const wheelDone = !!(w.rType||w.lType);
-  const rSph = w.rType? sph(w.rType,w.rPower) : '0.00';
-  const lSph = w.lType? sph(w.lType,w.lPower) : '0.00';
-  const add  = p.power || null;
-  const worse = (d.rLine&&d.lLine)? snellen(Math.min(d.rLine,d.lLine),0) : (d.rSnellen||d.lSnellen||'—');
-  const sign = w.rType||w.lType;
-  return {
-    rSph, rCyl: wheelDone?'-0.75':'0.00', rAxis:'10°', rAdd: add||'—',
-    lSph, lCyl: wheelDone?'-0.50':'0.00', lAxis:'180°', lAdd: add||'—',
-    recType: add? 'SV with Add':'Single vision',
-    material:'CR-39, AR Coated',
-    distanceLabel: sign==='Minus'?'Myopia' : sign==='Plus'?'Hyperopia' : 'Within range',
-    distanceSnellen: worse,
-    wheelDone, cyl:'-0.75 D × 10°',
-    add, addVal: add? add+' D' : '—'
-  };
+/* ============================ recorded-result summaries ============================ */
+/* Built ONLY from values the testers actually recorded. No invented cylinders,
+   axes, default powers, lens materials or coatings. The formula for combining
+   sphere + add-on + toric into one final prescription is NOT in the supplied
+   source: spherical total = sphere + add-on power is shown, toric power/axis are
+   kept as separate components, and the full combination rule is labelled
+   unresolved pending OOXii confirmation. */
+function sphericalTotal(eye){
+  if(!eye || !eye.spherePower) return null;
+  const sph=parseFloat(eye.spherePower);
+  const add=eye.addOnUsed && eye.addOnPower ? parseFloat(eye.addOnPower) : 0;
+  if(!Number.isFinite(sph)) return null;
+  const t=sph+add;
+  return (t>=0?'+':'')+t.toFixed(2);
+}
+function bestLensLabel(eye){
+  if(!eye || !eye.lensType) return '—';
+  if(eye.lensType==='Neither') return 'No lens improved vision';
+  const parts=['Sphere '+(eye.spherePower||'—')];
+  if(eye.addOnUsed && eye.addOnPower) parts.push('add-on '+eye.addOnPower+' (total '+(sphericalTotal(eye)||'—')+')');
+  if(eye.toricUsed && eye.toricPower!=null) parts.push('toric '+eye.toricPower+' @ '+eye.toricAxis+'° (separate component)');
+  return parts.join(' · ');
 }
 
 /* read-only client summary — surfaced at stations that need it (e.g. Dispense).
@@ -786,30 +1003,55 @@ const state = {
 };
 
 function seed(){
+  /* Demonstration sessions cover ALL FOUR valid routes and never violate the
+     corrected sequence (Registration → Distance → Near → route path). Wheel data
+     is demo "measured" spheres only — no invented toric powers, axes, cylinders,
+     materials or defaults. Routes are DERIVED by computeRoute(), never hard-coded. */
   const mk=(id,intake,extra,status,path,dir,time)=>({
     id, status, dir, time, path, version:1,
     intake:Object.assign({sessionType:'Individual'},intake),
-    distance:null, near:null, wheel:null, paddle:null, dispense:null, ...extra
+    distance:null, near:null, wheel:null, paddle:null, dispense:null, exit:null, ...extra
   });
-  // A47-K : next required = Wheel  (distance done, poor vision, wheel pending)
-  state.sessions['A47-K']=mk('A47-K',
-    {ageBand:'45–54',gender:'Male',village:'Lelepa',cataract:'No'},
-    {distance:{rLine:5,rLn:1,rSnellen:'',lLine:5,lLn:0,lSnellen:'',hasGlasses:false}},
-    'Ready', ['Registration','Distance','Wheel'], 'out', '10:42');
-  // B12-M : received from wheel, next = Paddle
-  state.sessions['B12-M']=mk('B12-M',
-    {ageBand:'55–64',gender:'Female',village:'Mele',cataract:'No'},
-    {distance:{rLine:6,rLn:2,lLine:6,lLn:2,hasGlasses:false},
-     wheel:{pd:62,rType:'Minus',rPower:'-2.50',lType:'Minus',lPower:'-2.00'}},
-    'Received', ['Wheel','Paddle'], 'in', '09:58');
-  // C09-T : new-ish, next = Distance
+  const wheelEye=(lensType,sphere)=>({lensType, spherePower:sphere, addOnUsed:false, addOnPower:null,
+    colourTestResult:'Same', canReadLine9OrSmaller:true, visionImproved:true,
+    postWheelLine:null, postWheelBonusLetters:0, postWheelLogMAR:null,
+    toricUsed:false, toricPower:null, toricAxis:null, bestLens:null});
+
+  // C09-T : registered only → next Distance
   state.sessions['C09-T']=mk('C09-T',
     {ageBand:'20–34',gender:'Female',village:'Pango',cataract:'No'},
     {}, 'Ready', ['Registration','Distance'], 'out', '09:31');
-  // recompute snellen for A47
-  const a=state.sessions['A47-K'].distance;
-  a.rSnellen=snellen(a.rLine,a.rLn); a.lSnellen=snellen(a.lLine,a.lLn);
-  state.queue=['A47-K','B12-M','C09-T'];
+
+  // A47-K : Distance FAIL (lines 5/5), Near PASS (line 9) → route wheel_only, next Wheel
+  state.sessions['A47-K']=mk('A47-K',
+    {ageBand:'45–54',gender:'Male',village:'Lelepa',cataract:'No'},
+    {distance:{rightUnaided:chartResult(5,1), leftUnaided:chartResult(5,0), hasGlasses:false, ownGlasses:null},
+     near:{unaided:chartResult(9,0), hasReading:false, ownGlasses:null}},
+    'Ready', ['Registration','Distance','Near','Wheel'], 'out', '10:42');
+
+  // B12-M : Distance FAIL (6/6), Near FAIL (line 6), Wheel complete → route wheel_then_paddle, next Paddle
+  state.sessions['B12-M']=mk('B12-M',
+    {ageBand:'55–64',gender:'Female',village:'Mele',cataract:'No'},
+    {distance:{rightUnaided:chartResult(6,2), leftUnaided:chartResult(6,2), hasGlasses:false, ownGlasses:null},
+     near:{unaided:chartResult(6,0), hasReading:false, ownGlasses:null},
+     wheel:{pd:62, right:wheelEye('Minus','-2.50'), left:wheelEye('Minus','-2.00')}},
+    'Received', ['Registration','Distance','Near','Wheel','Paddle'], 'in', '09:58');
+
+  // D31-W : Distance PASS (8/8), Near PASS (line 10) → route none, next Exit/Counselling
+  state.sessions['D31-W']=mk('D31-W',
+    {ageBand:'10–19',gender:'Male',village:'Erakor',cataract:'No'},
+    {distance:{rightUnaided:chartResult(8,0), leftUnaided:chartResult(8,3), hasGlasses:false, ownGlasses:null},
+     near:{unaided:chartResult(10,0), hasReading:false, ownGlasses:null}},
+    'Ready', ['Registration','Distance','Near','Exit'], 'out', '10:05');
+
+  // E58-S : Distance PASS (7/7), Near FAIL (line 8) → route paddle_only, next Paddle
+  state.sessions['E58-S']=mk('E58-S',
+    {ageBand:'55–64',gender:'Female',village:'Ifira',cataract:'No'},
+    {distance:{rightUnaided:chartResult(7,0), leftUnaided:chartResult(7,2), hasGlasses:false, ownGlasses:null},
+     near:{unaided:chartResult(8,0), hasReading:false, ownGlasses:null}},
+    'Ready', ['Registration','Distance','Near','Paddle'], 'out', '10:18');
+
+  state.queue=['C09-T','A47-K','B12-M','D31-W','E58-S'];
 }
 seed();
 /* map the restored station to its device id (station gating itself never depends on this) */
@@ -881,8 +1123,59 @@ function privacy(extra){
   </div>`;
 }
 
+/* ============================ CONFIG ERROR ============================ */
+/* Shown when js/config.js has not been created (see js/config.example.js).
+   ?demo=1 bypasses this for a fully local, backend-free walkthrough. */
+function isDemoModeUrl(){ try{ return new URLSearchParams(location.search).get('demo')==='1'; }catch(e){ return false; } }
+function ScreenConfigError(){
+  screenEl().innerHTML=`<div class="pad">
+    ${header()}
+    <div class="camp" style="margin-top:34px">
+      <div class="camp-ic" style="background:linear-gradient(160deg,#f06a7a,#b23a4a)">${I('warn',26)}</div>
+      <div><h1>Configuration needed</h1><p>This device has no Supabase connection set up yet</p></div>
+    </div>
+    <div class="notice" style="margin-top:20px">
+      <span class="x">${I('warn',22,'#f06a7a')}</span>
+      <div><div class="t">js/config.js is missing or still has placeholder values</div>
+      <div class="s">Copy <b>js/config.example.js</b> to <b>js/config.js</b> and fill in your Supabase project URL and publishable key — see SUPABASE_SETUP.md.</div></div>
+    </div>
+    <button class="btn btn-primary" onclick="location.reload()">${I('cloud',20)} Reload once configured</button>
+    <button class="btn btn-secondary" onclick="location.search='?demo=1'">Continue in demo mode (no backend)</button>
+    <div class="hint">Demo mode runs entirely on this device with sample clients — nothing syncs anywhere.</div>
+  </div>`;
+}
+
 /* ============================ SIGN IN ============================ */
 function ScreenSignIn(){
+  if(!window.OOXII_CONFIG_VALID && !isDemoModeUrl()){ go(ScreenConfigError); return; }
+  if(!window.OOXII_CONFIG_VALID){ return renderDemoSignIn(); }        // ?demo=1, no backend at all
+  if(!navigator.onLine){ return renderOfflineUnlock(); }              // no connection right now
+  return renderOnlineSignIn();
+}
+function renderDemoSignIn(){
+  screenEl().innerHTML = `<div class="pad">
+    ${header()}
+    <div class="camp" style="margin-top:34px">
+      <div class="camp-ic">${I('eye',28)}</div>
+      <div><h1>Demo mode</h1><p>No backend connected — sample data only, nothing syncs</p></div>
+    </div>
+    <div style="margin-top:30px">
+      <div class="signin-field"><label>Email</label><input id="si-email" class="full" type="email" placeholder="tester@ooxii.org" value="ana.t@ooxii.org"></div>
+      <div class="signin-field"><label>Password</label><input id="si-pass" class="full" type="password" placeholder="••••••••" value="Camp!2025"></div>
+      <div id="si-err" class="err" style="display:none"></div>
+      <button class="btn btn-primary" onclick="doDemoSignIn()">Continue in demo mode</button>
+    </div>
+    <div class="hint">Real sign-in needs a configured Supabase project — see SUPABASE_SETUP.md.</div>
+  </div>`;
+}
+function doDemoSignIn(){
+  const email=$('#si-email').value.trim(), pass=$('#si-pass').value;
+  const err=$('#si-err');
+  if(!email || !pass){ err.style.display='block'; err.textContent='Enter your email and password.'; return; }
+  state.authed=true; go(ScreenHome);
+}
+
+function renderOnlineSignIn(){
   screenEl().innerHTML = `<div class="pad">
     ${header()}
     <div class="camp" style="margin-top:34px">
@@ -890,28 +1183,100 @@ function ScreenSignIn(){
       <div><h1>Welcome back</h1><p>Sign in to your OOXii tester account</p></div>
     </div>
     <div style="margin-top:30px">
-      <div class="signin-field"><label>Email</label><input id="si-email" class="full" type="email" placeholder="tester@ooxii.org" value="ana.t@ooxii.org"></div>
-      <div class="signin-field"><label>Password</label><input id="si-pass" class="full" type="password" placeholder="••••••••" value="Camp!2025"></div>
-      <div id="si-err" class="err" style="display:none"></div>
-      <div class="checkrow" onclick="toggleRemember(this)">
-        <span class="checkbox ${state.remember?'on':''}">${state.remember?I('check',16):''}</span>
-        Remember this device (30-day offline access)
-      </div>
-      <button class="btn btn-primary" onclick="doSignIn()">Sign in</button>
-      <button class="btn btn-secondary" onclick="toast('Account creation needs internet — stub in this demo','cloud')">Create account</button>
+      <div class="signin-field"><label>Email</label><input id="si-email" class="full" type="email" placeholder="tester@ooxii.org" autocomplete="username"></div>
+      <div class="signin-field"><label>Password</label><input id="si-pass" class="full" type="password" placeholder="••••••••" autocomplete="current-password"></div>
+      <div id="si-err" class="err" style="display:none" role="alert"></div>
+      <button class="btn btn-primary" id="si-btn" onclick="doOnlineSignIn()">Sign in</button>
     </div>
-    <div class="hint">Internet is needed only to sign in, download camp config and sync later.<br>After that the camp runs fully offline for 30 days.</div>
+    <div class="hint">Internet is needed for this first sign-in. After that, set an offline PIN and the camp runs fully offline for 30 days.</div>
   </div>`;
 }
-function toggleRemember(el){ state.remember=!state.remember;
-  const c=el.querySelector('.checkbox'); c.classList.toggle('on',state.remember); c.innerHTML=state.remember?I('check',16):''; }
-function doSignIn(){
+async function doOnlineSignIn(){
   const email=$('#si-email').value.trim(), pass=$('#si-pass').value;
-  const err=$('#si-err');
+  const err=$('#si-err'), btn=$('#si-btn');
   if(!email || !pass){ err.style.display='block'; err.textContent='Enter your email and password.'; return; }
-  state.authed=true; go(ScreenHome);
+  err.style.display='none'; btn.disabled=true; btn.textContent='Signing in…';
+  const r = await window.OOXII_AUTH.signInOnline(email, pass);
+  btn.disabled=false; btn.textContent='Sign in';
+  if(!r.ok){ err.style.display='block'; err.textContent=r.error; return; }
+  applyAuthContext(r.context);
+  window.OOXII_BACKEND.refreshCachedContext(r.context);
+  promptOfflinePinSetup();
+}
+function promptOfflinePinSetup(){
+  scrim(`<div class="modal">
+    <div class="ic sq" style="background:var(--chip);width:60px;height:60px;margin:0 auto 12px">${I('shield',28,'#1cc3d6')}</div>
+    <h3>Set an offline PIN</h3>
+    <p>This lets you use OOXii for up to 30 days without internet. Choose a 4–8 digit PIN — not your account password.</p>
+    <input id="pin-set" class="full" type="password" inputmode="numeric" maxlength="8" placeholder="4–8 digit PIN" style="text-align:center;font-size:20px;letter-spacing:4px;margin-bottom:10px">
+    <div id="pin-set-err" class="err" style="display:none"></div>
+    <button class="btn btn-primary" onclick="confirmOfflinePinSetup()">Save PIN &amp; continue</button>
+    <button class="btn btn-secondary" onclick="closeScrim();go(ScreenHome)">Skip for now</button>
+  </div>`);
+}
+async function confirmOfflinePinSetup(){
+  const pin=$('#pin-set').value;
+  const r = await window.OOXII_AUTH.setOfflinePin(pin);
+  if(!r.ok){ const e=$('#pin-set-err'); e.style.display='block'; e.textContent=r.error; return; }
+  closeScrim();
+  toast('Offline access ready for 30 days');
+  go(ScreenHome);
 }
 
+function renderOfflineUnlock(){
+  window.OOXII_AUTH.offlinePermitStatus().then((status)=>{
+    if(!status.exists || !status.valid){
+      screenEl().innerHTML = `<div class="pad">
+        ${header()}
+        <div class="camp" style="margin-top:34px">
+          <div class="camp-ic" style="background:linear-gradient(160deg,#f5b945,#b98a1f)">${I('cloud',26)}</div>
+          <div><h1>No internet connection</h1><p>First sign-in on this device must happen online</p></div>
+        </div>
+        <div class="notice warn" style="margin-top:20px"><span class="x">${I('warn',22,'#f5b945')}</span>
+          <div><div class="t">${status.exists?'Offline access has expired':'This device has no offline access yet'}</div>
+          <div class="s">Connect to the internet once to sign in and set up 30-day offline access.</div></div></div>
+        <button class="btn btn-primary" onclick="go(ScreenSignIn)">${I('cloud',20)} Try again</button>
+      </div>`;
+      return;
+    }
+    screenEl().innerHTML = `<div class="pad">
+      ${header()}
+      <div class="camp" style="margin-top:34px">
+        <div class="camp-ic">${I('eye',28)}</div>
+        <div><h1>Welcome back, ${status.displayName}</h1><p>Offline — enter your PIN to continue</p></div>
+      </div>
+      <div style="margin-top:30px">
+        <div class="signin-field"><label>Offline PIN</label>
+          <input id="si-pin" class="full" type="password" inputmode="numeric" maxlength="8" placeholder="••••" style="text-align:center;font-size:20px;letter-spacing:4px"></div>
+        <div id="si-err" class="err" style="display:none" role="alert"></div>
+        <button class="btn btn-primary" onclick="doOfflineUnlock()">Unlock</button>
+      </div>
+      <div class="hint">Offline access valid until ${new Date(status.expiresAt).toLocaleDateString()}.</div>
+    </div>`;
+  });
+  screenEl().innerHTML = `<div class="pad">${header()}<div class="hint" style="margin-top:60px;text-align:center">Checking offline access…</div></div>`;
+}
+async function doOfflineUnlock(){
+  const pin=$('#si-pin').value, err=$('#si-err');
+  const r = await window.OOXII_AUTH.unlockOffline(pin);
+  if(!r.ok){ err.style.display='block'; err.textContent=r.error; return; }
+  applyAuthContext(r.context);
+  window.OOXII_BACKEND.refreshCachedContext(r.context);
+  toast('Signed in offline','cloud');
+  go(ScreenHome);
+}
+
+/** Map the backend auth context onto the existing `state.tester` shape the
+    UI already renders everywhere — no screen needed to change for this. */
+function applyAuthContext(ctx){
+  state.authed = true;
+  state.tester.name = ctx.displayName;
+  state.tester.email = ctx.email || state.tester.email;
+  state.tester.testerId = ctx.userId ? ctx.userId.slice(0,8).toUpperCase() : state.tester.testerId;
+  if(ctx.festivals && ctx.festivals[0]){
+    state.tester.camp = ctx.festivals[0].festivalName;
+  }
+}
 /* ============================ HOME (tablet dashboard: sidebar + 3 nav cards) ============================ */
 function honeyDropIcon(w=18,h=24,id='dgS'){
   return `<svg width="${w}" height="${h}" viewBox="0 0 18 24" aria-hidden="true">
@@ -922,12 +1287,24 @@ function honeyDropIcon(w=18,h=24,id='dgS'){
 }
 /* persistent left sidebar: tester profile + Honey Rewards (Today's Progress).
    Honey rewards participation and handovers only — never clinical outcomes. */
+/* Today/month totals: confirmed honey_events (server) + this device's still-
+   pending awards when a real backend is signed in and reachable, otherwise
+   the existing local-only state.honey counters — unchanged visuals either
+   way, just a different (correct, cross-device) source for the numbers.
+   See getHoneyTotals() / getPendingHoneyNote(). */
+function getHoneyTotals(){
+  const cached = window.OOXII_BACKEND ? window.OOXII_BACKEND.getCachedHoneyDisplayTotalsSync() : null;
+  if(window.OOXII_BACKEND) window.OOXII_BACKEND.refreshHoneyDisplayCache(); // background, non-blocking
+  if(!cached) return {today:state.honey.today, month:state.honey.monthClients, pendingCount:0, confirmed:false};
+  return {today:cached.today, month:cached.month, pendingCount:cached.pendingCount, confirmed:true};
+}
 function sidebar(){
   const t=state.tester, h=state.honey;
-  const badge=dailyBadge(h.today), next=nextDailyMilestone(h.today);
-  const pct=Math.min(100,Math.round((h.today/DAILY_TARGET)*100));
-  const cellsFilled=Math.min(COMB_CELLS,Math.floor(h.today/(DAILY_TARGET/COMB_CELLS)));
-  const mLevel=monthlyLevel(h.monthClients);
+  const totals=getHoneyTotals();
+  const badge=dailyBadge(totals.today), next=nextDailyMilestone(totals.today);
+  const pct=Math.min(100,Math.round((totals.today/DAILY_TARGET)*100));
+  const cellsFilled=Math.min(COMB_CELLS,Math.floor(totals.today/(DAILY_TARGET/COMB_CELLS)));
+  const mLevel=monthlyLevel(totals.month);
   const st=getActiveTesterStation();
   return `<aside class="tl-side" aria-label="Tester profile and Honey Rewards">
     <div class="side-card">
@@ -946,20 +1323,21 @@ function sidebar(){
         ${honeyDropIcon(15,20,'dgT')} Today's Progress</div>
       <div class="honey-balance">
         ${honeyDropIcon(24,31,'dgB')}
-        <div><div class="n">${h.today}</div><div style="color:var(--dim);font-size:12px">clients helped today</div></div>
+        <div><div class="n">${totals.today}</div><div style="color:var(--dim);font-size:12px">clients helped today</div></div>
         ${badge?`<span class="tier-badge-sm" style="background:${badge.color};color:#1b1d3a;margin-left:auto">${badge.label}</span>`:''}
       </div>
       <div style="margin-top:12px">${honeycombRow(cellsFilled,COMB_CELLS)}</div>
-      <div class="hr-line">${h.today} / ${DAILY_TARGET} clients completed today</div>
+      <div class="hr-line">${totals.today} / ${DAILY_TARGET} clients completed today</div>
       <div class="hr-line dim">${pct>=100
         ?'Today’s comb is full — thank you! 🏆'
         :`You’re ${pct}% of the way to filling today’s honeycomb`}</div>
-      ${next?`<div class="hr-line dim">⬢ ${next.n-h.today} honey until ${next.label}</div>`:''}
+      ${next?`<div class="hr-line dim">⬢ ${next.n-totals.today} honey until ${next.label}</div>`:''}
       <div class="hr-month">
         <b style="color:#fff">This Month</b><br>
-        🍯 ${h.monthClients} client${h.monthClients===1?'':'s'} supported · ${h.sessionDays.length} festival session${h.sessionDays.length===1?'':'s'}<br>
+        🍯 ${totals.month} client${totals.month===1?'':'s'} supported · ${h.sessionDays.length} festival session${h.sessionDays.length===1?'':'s'}<br>
         <span style="color:${mLevel.color};font-weight:800">${mLevel.label}</span>
       </div>
+      ${totals.confirmed&&totals.pendingCount>0?`<div class="hr-line dim">⏳ ${totals.pendingCount} not yet synced — still counted here</div>`:''}
       <div class="honey-msg">${t.lastHoney?('Latest: +1 🍯 '+t.lastHoney):'Honey rewards participation — never test results.'}</div>
     </div>
   </aside>`;
@@ -1021,12 +1399,10 @@ function cap(x){return x.charAt(0).toUpperCase()+x.slice(1);}
 /* gated open from any queue row or search result — always via the central helper */
 function openSessionById(id){ const s=state.sessions[id]; if(s) openSessionForActiveStation(s); }
 function routeToStep(s){
-  if(s.status==='Finalised'){
-    // individual mode has no Dispense station to hold the client — go straight to exit review
-    (isIndividualMode() || getActiveTesterStation()==='Exit' ? ScreenExit : ScreenDispense)(); return;
-  }
-  const next = DE.getNextRequiredStep(s);
-  ({Registration:ScreenIntake, Distance:ScreenDistance, Near:ScreenNear, Wheel:ScreenWheel, Paddle:ScreenPaddle, Dispense:ScreenDispense}[next]||ScreenDispense)();
+  let next = DE.getNextRequiredStep(s);
+  if(next==='Complete') next = terminalStep(s); // read-only review at the terminal screen
+  ({Registration:ScreenIntake, Distance:ScreenDistance, Near:ScreenNear, Wheel:ScreenWheel,
+    Paddle:ScreenPaddle, Dispense:ScreenDispense, Exit:ScreenExit}[next]||ScreenHome)();
 }
 
 /* ============================ NEW CLIENT INTAKE ============================ */
@@ -1091,99 +1467,146 @@ function saveIntake(){
   if(!s.intake.ageBand||!s.intake.gender||!s.intake.village||!s.intake.cataract){ toast('Complete all required fields','warn'); return; }
   s.status='In Progress'; s.path=['Registration','Distance']; s.dir='out'; s.time=nowTime(); s.version++;
   if(!state.queue.includes(s.id)) state.queue.unshift(s.id);
+  recordBackendEvent('Registration', s, 'Registration');
   finishStationTask(s,'Registration complete');
 }
+/* Fire-and-forget local-first persistence + sync queue hook (see
+   js/backend-adapter.js). Called AFTER the decision engine + screen code
+   above has already validated and mutated state.sessions — never before,
+   and never awaited, so the clinical UI is never blocked on IndexedDB or
+   the network. */
+function recordBackendEvent(step, s, station){
+  if(window.OOXII_BACKEND){
+    window.OOXII_BACKEND.recordEvent(step, s, station || getActiveTesterStation())
+      .catch((e)=>console.error('[OOXii] recordEvent failed', step, e));
+  }
+}
 
-/* ============================ DISTANCE ============================ */
+/* ============================ DISTANCE PRE-TEST ============================ */
+/* Right eye unaided → left eye unaided → own-glasses question (with-glasses
+   result REQUIRED when Yes). LogMAR is system-calculated. The route is NOT
+   decided here — after Distance the client always goes to the Near pre-test. */
 function ScreenDistance(){
   const s=guardStep('Distance'); if(!s) return;
-  const d=s.distance||(s.distance={hasGlasses:null});
+  const d=s.distance||(s.distance={rightUnaided:null,leftUnaided:null,hasGlasses:null,ownGlasses:null});
+  const ru=d.rightUnaided||{}, lu=d.leftUnaided||{};
   screenEl().innerHTML=`<div class="pad pb">
     ${header(s.id)}
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Distance', s)}
-    <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Works without internet</div><div class="s">Saved on this device</div></div></div>
+    <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Distance pre-test</div><div class="s">Both eyes tested separately, without glasses</div></div></div>
 
     ${instructionCard(eyeCoverGraphic('L'),'Right eye · no glasses','Ask the person to cover their left eye with the palm of their hand.')}
-    ${fieldEyeLine('Smallest line all correct','d-rline',d.rLine,'r')}
-    ${fieldLetters('Letters correct on next line','d-rlet',d.rLn)}
-    ${fieldReadout('Right eye result','d-rsnellen', snellen(d.rLine,d.rLn))}
+    ${fieldEyeLine('Smallest line all correct','d-rline',ru.lineReached,'r')}
+    ${fieldLetters('Letters correct on next line','d-rlet',ru.bonusLetters)}
+    ${fieldReadout('Right eye result','d-rout', acuityLabel(ru.lineReached,ru.bonusLetters||0))}
 
     ${instructionCard(eyeCoverGraphic('R'),'Left eye · no glasses','Ask the person to cover their right eye with the palm of their hand.')}
-    ${fieldEyeLine('Smallest line all correct','d-lline',d.lLine,'l')}
-    ${fieldLetters('Letters correct on next line','d-llet',d.lLn)}
-    ${fieldReadout('Left eye result','d-lsnellen', snellen(d.lLine,d.lLn))}
+    ${fieldEyeLine('Smallest line all correct','d-lline',lu.lineReached,'l')}
+    ${fieldLetters('Letters correct on next line','d-llet',lu.bonusLetters)}
+    ${fieldReadout('Left eye result','d-lout', acuityLabel(lu.lineReached,lu.bonusLetters||0))}
 
-    ${fieldSeg('glasses','Has distance glasses?',null,'d-glass',['Yes','No'], d.hasGlasses==null?null:(d.hasGlasses?'Yes':'No'))}
+    ${fieldSeg('glasses','Does the client currently have a pair of distance glasses?',null,'d-glass',['Yes','No'], d.hasGlasses==null?null:(d.hasGlasses?'Yes':'No'))}
     <div id="d-own"></div>
   </div>
-  <div class="btn-row"><button class="btn btn-primary" id="d-save" onclick="saveDistance()">Save &amp; show next step ${I('arrowR',22)}</button></div>`;
-  // live snellen
-  ['d-rline','d-rlet'].forEach(id=>$('#'+id).addEventListener('change',()=>{$('#d-rsnellen').textContent=snellen(+$('#d-rline').value||0,+$('#d-rlet').value||0);}));
-  ['d-lline','d-llet'].forEach(id=>$('#'+id).addEventListener('change',()=>{$('#d-lsnellen').textContent=snellen(+$('#d-lline').value||0,+$('#d-llet').value||0);}));
+  <div class="btn-row"><button class="btn btn-primary" id="d-save" onclick="saveDistance()">Save — Near test is next ${I('arrowR',22)}</button></div>`;
+  const live=(lineId,letId,outId)=>{const f=()=>{$('#'+outId).textContent=acuityLabel(lineVal(lineId),+$('#'+letId).value||0);};
+    $('#'+lineId).addEventListener('change',f); $('#'+letId).addEventListener('change',f);};
+  live('d-rline','d-rlet','d-rout'); live('d-lline','d-llet','d-lout');
   wireSeg('d-glass', renderOwnGlasses);
   if(d.hasGlasses) renderOwnGlasses('Yes');
 }
 function renderOwnGlasses(v){
   const wrap=$('#d-own'); if(v!=='Yes'){wrap.innerHTML=''; return;}
-  const d=state.sessions[state.activeId].distance;
+  const og=(state.sessions[state.activeId].distance||{}).ownGlasses||{};
   wrap.innerHTML=`
-    ${instructionCard(bothEyesGraphic(true),'With own glasses · both eyes open','Ask the person to keep both eyes open and wear their own distance glasses.')}
-    ${fieldEyeLine('Smallest line all correct','d-owline',d.owLine,'both')}
-    ${fieldLetters('Letters correct on next line','d-owlet',d.owLn)}
-    ${fieldReadout('Both eyes with glasses','d-owsnellen', snellen(d.owLine,d.owLn))}`;
-  ['d-owline','d-owlet'].forEach(id=>$('#'+id).addEventListener('change',()=>{$('#d-owsnellen').textContent=snellen(+$('#d-owline').value||0,+$('#d-owlet').value||0);}));
+    ${instructionCard(bothEyesGraphic(true),'Distance Vision – Own Glasses – Both Eyes Open','Ask the person to keep both eyes open and wear their own distance glasses. This result is required.')}
+    ${fieldEyeLine('Smallest line all correct','d-owline',og.lineReached,'both')}
+    ${fieldLetters('Letters correct on next line','d-owlet',og.bonusLetters)}
+    ${fieldReadout('Both eyes with own glasses','d-owout', acuityLabel(og.lineReached,og.bonusLetters||0))}`;
+  const f=()=>{$('#d-owout').textContent=acuityLabel(lineVal('d-owline'),+$('#d-owlet').value||0);};
+  $('#d-owline').addEventListener('change',f); $('#d-owlet').addEventListener('change',f);
 }
 function saveDistance(){
-  const s=state.sessions[state.activeId]; const g=segVal('d-glass');
-  const rLine=+$('#d-rline').value, lLine=+$('#d-lline').value;
-  if(!rLine||!lLine||!g){ toast('Complete both eyes and the glasses question','warn'); return; }
-  s.distance={ rLine, rLn:+$('#d-rlet').value||0, rSnellen:snellen(rLine,+$('#d-rlet').value||0),
-    lLine, lLn:+$('#d-llet').value||0, lSnellen:snellen(lLine,+$('#d-llet').value||0),
-    hasGlasses:g==='Yes',
-    owLine:g==='Yes'?+$('#d-owline').value:null, owLn:g==='Yes'?(+$('#d-owlet').value||0):null };
-  s.version++; s._stepLabel='Distance done'; advance(s);
+  const s=state.sessions[state.activeId]; if(!canCompleteStep(s,'Distance')){ backToBase(); return; }
+  const g=segVal('d-glass');
+  const right=chartResult(lineVal('d-rline'), +$('#d-rlet').value||0);
+  const left =chartResult(lineVal('d-lline'), +$('#d-llet').value||0);
+  if(!right||!left||!g){ toast('Complete both eyes (lines 0–11) and the glasses question','warn'); return; }
+  let own=null;
+  if(g==='Yes'){
+    own=chartResult(lineVal('d-owline'), +$('#d-owlet').value||0);
+    if(!own){ toast('Record the with-glasses result — required when the client has distance glasses','warn'); return; }
+  }
+  /* unaided and own-glasses results stored separately; own-glasses does NOT
+     replace the unaided pre-test result (no authoritative rule says it may) */
+  s.distance={ rightUnaided:right, leftUnaided:left, hasGlasses:g==='Yes', ownGlasses:own,
+    testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime() };
+  s.version++; s._stepLabel='Distance test done'; recordBackendEvent('Distance', s, 'Distance'); advance(s);
 }
 
-/* ============================ NEAR ============================ */
+/* ============================ NEAR PRE-TEST ============================ */
+/* Both eyes together, unaided → own reading-glasses question (with-glasses
+   result REQUIRED when Yes). Only after this is the route computed — a client
+   is never sent to Wheel before Near is complete. */
 function ScreenNear(){
   const s=guardStep('Near'); if(!s) return;
-  const n=s.near||(s.near={hasGlasses:null});
+  const n=s.near||(s.near={unaided:null,hasReading:null,ownGlasses:null});
+  const u=n.unaided||{};
   screenEl().innerHTML=`<div class="pad pb">
     ${header(s.id)}
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Distance', s)}
-    <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Near vision screening</div><div class="s">Saved on this device</div></div></div>
+    <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Near pre-test</div><div class="s">Both eyes together, without glasses</div></div></div>
 
     ${instructionCard(bothEyesGraphic(),'Near vision · no glasses','Ask the person to use both eyes to read the near card.')}
-    ${fieldEyeLine('Smallest near line all correct','n-line',n.line,'both')}
-    ${fieldReadout('Both eyes near result','n-snellen', snellen(n.line,0))}
+    ${fieldEyeLine('Smallest near line all correct','n-line',u.lineReached,'both')}
+    ${fieldLetters('Letters correct on next line','n-let',u.bonusLetters)}
+    ${fieldReadout('Both eyes near result','n-out', acuityLabel(u.lineReached,u.bonusLetters||0))}
 
-    ${fieldSeg('glasses','Has reading glasses?',null,'n-glass',['Yes','No'], n.hasGlasses==null?null:(n.hasGlasses?'Yes':'No'))}
+    ${fieldSeg('glasses','Does the client currently have a pair of reading glasses?',null,'n-glass',['Yes','No'], n.hasReading==null?null:(n.hasReading?'Yes':'No'))}
     <div id="n-own"></div>
   </div>
-  <div class="btn-row"><button class="btn btn-primary" onclick="saveNear()">Save &amp; show next step ${I('arrowR',22)}</button></div>`;
-  $('#n-line').addEventListener('change',()=>{$('#n-snellen').textContent=snellen(+$('#n-line').value||0,0);});
-  wireSeg('n-glass',(v)=>{
-    const w=$('#n-own'); if(v!=='Yes'){w.innerHTML='';return;}
-    w.innerHTML=`${instructionCard(bothEyesGraphic(true),'With own reading glasses','Ask the person to use both eyes with their own reading glasses.')}
-      ${fieldEyeLine('Smallest near line all correct','n-owline',n.owLine,'both')}
-      ${fieldReadout('Both eyes with glasses','n-owsnellen', snellen(n.owLine,0))}`;
-    $('#n-owline').addEventListener('change',()=>{$('#n-owsnellen').textContent=snellen(+$('#n-owline').value||0,0);});
-  });
-  if(n.hasGlasses) wireSeg('n-glass');
+  <div class="btn-row"><button class="btn btn-primary" onclick="saveNear()">Save — route is calculated next ${I('arrowR',22)}</button></div>`;
+  const live=()=>{$('#n-out').textContent=acuityLabel(lineVal('n-line'),+$('#n-let').value||0);};
+  $('#n-line').addEventListener('change',live); $('#n-let').addEventListener('change',live);
+  wireSeg('n-glass',renderOwnReading);
+  if(n.hasReading) renderOwnReading('Yes');
+}
+function renderOwnReading(v){
+  const wrap=$('#n-own'); if(v!=='Yes'){wrap.innerHTML=''; return;}
+  const og=(state.sessions[state.activeId].near||{}).ownGlasses||{};
+  wrap.innerHTML=`
+    ${instructionCard(bothEyesGraphic(true),'Near Vision – Own Reading Glasses – Both Eyes','Ask the person to use both eyes with their own reading glasses. This result is required.')}
+    ${fieldEyeLine('Smallest near line all correct','n-owline',og.lineReached,'both')}
+    ${fieldLetters('Letters correct on next line','n-owlet',og.bonusLetters)}
+    ${fieldReadout('Both eyes with own reading glasses','n-owout', acuityLabel(og.lineReached,og.bonusLetters||0))}`;
+  const f=()=>{$('#n-owout').textContent=acuityLabel(lineVal('n-owline'),+$('#n-owlet').value||0);};
+  $('#n-owline').addEventListener('change',f); $('#n-owlet').addEventListener('change',f);
 }
 function saveNear(){
-  const s=state.sessions[state.activeId]; const g=segVal('n-glass'); const line=+$('#n-line').value;
-  if(!line||!g){ toast('Complete near line and glasses question','warn'); return; }
-  s.near={line, snellen:snellen(line,0), hasGlasses:g==='Yes', owLine:g==='Yes'?+$('#n-owline').value:null};
-  s.version++; s._stepLabel='Near vision done'; advance(s);
+  const s=state.sessions[state.activeId]; if(!canCompleteStep(s,'Near')){ backToBase(); return; }
+  const g=segVal('n-glass');
+  const unaided=chartResult(lineVal('n-line'), +$('#n-let').value||0);
+  if(!unaided||!g){ toast('Complete the near line (0–11) and the glasses question','warn'); return; }
+  let own=null;
+  if(g==='Yes'){
+    own=chartResult(lineVal('n-owline'), +$('#n-owlet').value||0);
+    if(!own){ toast('Record the with-glasses result — required when the client has reading glasses','warn'); return; }
+  }
+  s.near={unaided, hasReading:g==='Yes', ownGlasses:own,
+    testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime()};
+  s.version++; s._stepLabel='Near test done'; recordBackendEvent('Near', s, 'Distance'); advance(s);
 }
 
-/* ============================ WHEEL ============================ */
+/* ============================ WHEEL (per eye) ============================ */
+/* Right eye = blue side of wheel, left eye = white side (preserved convention).
+   Add-on lens is only used when the required prescription exceeds the wheel's
+   built-in range; toric correction is optional, used only when it improves
+   vision. No invented sphere/cylinder/axis/material/frame values. */
 function ScreenWheel(){
   const s=guardStep('Wheel'); if(!s) return;
-  const w=s.wheel||(s.wheel={});
+  const w=s.wheel||(s.wheel={pd:null,right:null,left:null});
   screenEl().innerHTML=`<div class="pad pb">
     ${header(s.id)}
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
@@ -1192,82 +1615,149 @@ function ScreenWheel(){
 
     ${fieldNumber('wheel','Pupillary distance (PD)','Valid range 52–78','w-pd',w.pd,52,78)}
 
-    ${eyeBlock('Right eye','r', w, 'Make sure the black lens is covering the left eye.')}
-    ${eyeBlock('Left eye','l', w, 'Make sure the black lens is covering the right eye.')}
+    ${eyeBlock('Right eye','r','right', w.right||{}, 'Make sure the black lens is covering the left eye.', 'var(--blue)')}
+    ${eyeBlock('Left eye','l','left', w.left||{}, 'Make sure the black lens is covering the right eye.', '#fff')}
   </div>
-  <div class="btn-row"><button class="btn btn-primary" onclick="saveWheel()">Save &amp; show next step ${I('arrowR',22)}</button></div>`;
-  ['r','l'].forEach(side=>{
-    const t=$('#w-'+side+'type');
-    t.addEventListener('change',()=>{ $('#w-'+side+'pow-wrap').style.display = (t.value==='Plus'||t.value==='Minus')?'flex':'none'; });
+  <div class="btn-row"><button class="btn btn-primary" onclick="saveWheel()">Save — Dispensing checked next ${I('arrowR',22)}</button></div>`;
+  ['r','l'].forEach(p=>{
+    const t=$('#w-'+p+'-type');
+    t.addEventListener('change',()=>{ $('#w-'+p+'-sph-wrap').style.display = (t.value==='Plus'||t.value==='Minus')?'flex':'none'; });
+    wireSeg('w-'+p+'-addon', v=>{ $('#w-'+p+'-addonpow-wrap').style.display = v==='Yes'?'flex':'none'; });
+    wireSeg('w-'+p+'-toric', v=>{ $('#w-'+p+'-toric-wrap').style.display = v==='Yes'?'block':'none'; });
+    wireSeg('w-'+p+'-read9'); wireSeg('w-'+p+'-improved');
   });
 }
-function eyeBlock(title,side,w,instr){
-  const marker = side==='r'? '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:var(--blue);margin-right:8px;vertical-align:middle"></span>'
-                           : '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#fff;margin-right:8px;vertical-align:middle"></span>';
-  const t=w[side+'Type'];
-  return `<div class="sec" style="margin:22px 2px 10px"><h2 style="font-size:18px">${marker}${title}</h2></div>
-    ${instructionCard(eyeCoverGraphic(side==='r'?'L':'R'), 'Cover the other eye', instr)}
+function eyeBlock(title,p,key,e,instr,markerColor){
+  const addonOn = !!e.addOnUsed, toricOn = !!e.toricUsed;
+  return `<div class="sec" style="margin:22px 2px 10px"><h2 style="font-size:18px">
+    <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${markerColor};margin-right:8px;vertical-align:middle;border:1px solid rgba(0,0,0,.2)"></span>${title}</h2></div>
+    ${instructionCard(eyeCoverGraphic(p==='r'?'L':'R'), 'Cover the other eye', instr)}
     <div class="frow"><div class="fic">${I('wheel',22)}</div><div class="flabel"><div class="l">Best lens is</div></div>
-      <div class="fctl"><select id="w-${side}type">${opt(['','Plus','Minus','Neither'],t,{'':'Select…','Neither':'Neither helps'})}</select></div></div>
-    <div class="frow" id="w-${side}pow-wrap" style="display:${(t==='Plus'||t==='Minus')?'flex':'none'}"><div class="fic">${I('lens',22)}</div>
-      <div class="flabel"><div class="l">Best plus/minus power</div></div>
-      <div class="fctl"><select id="w-${side}pow">${opt(LENS_POWERS,w[side+'Power'],{'':'—'})}</select></div></div>
+      <div class="fctl"><select id="w-${p}-type">${opt(['','Plus','Minus','Neither'],e.lensType,{'':'Select…','Neither':'Neither helps vision'})}</select></div></div>
+    <div class="frow" id="w-${p}-sph-wrap" style="display:${(e.lensType==='Plus'||e.lensType==='Minus')?'flex':'none'}"><div class="fic">${I('lens',22)}</div>
+      <div class="flabel"><div class="l">Spherical component</div></div>
+      <div class="fctl"><select id="w-${p}-sph">${opt(LENS_POWERS,e.spherePower,{'':'—'})}</select></div></div>
     <div class="frow"><div class="fic" style="background:linear-gradient(90deg,#d23b4e 50%,#2bb56a 50%)">${I('eye',22)}</div><div class="flabel"><div class="l">Two-colour test</div><div class="h">Which side looks sharper / darker?</div></div>
-      <div class="fctl"><select id="w-${side}2c">${opt(['','Red','Green','Same'],w[side+'TwoColour'],{'':'Select…','Red':'Red side','Green':'Green side','Same':'Same'})}</select></div></div>`;
+      <div class="fctl"><select id="w-${p}-colour">${opt(['','Red','Green','Same'],e.colourTestResult,{'':'Select…','Red':'Red side clearer','Green':'Green side clearer','Same':'Look the same'})}</select></div></div>
+    <div class="frow"><div class="fic">${I('check',22)}</div><div class="flabel"><div class="l">Can read line 9 or smaller now?</div></div>
+      <div class="fctl"><div class="seg" id="w-${p}-read9">${['Yes','No'].map(o=>`<button data-v="${o}" class="${e.canReadLine9OrSmaller===(o==='Yes')?'on':''}">${o}</button>`).join('')}</div></div></div>
+    <div class="frow"><div class="fic">${I('glasses',22)}</div><div class="flabel"><div class="l">Vision improved at the Wheel?</div></div>
+      <div class="fctl"><div class="seg" id="w-${p}-improved">${['Yes','No'].map(o=>`<button data-v="${o}" class="${e.visionImproved===(o==='Yes')?'on':''}">${o}</button>`).join('')}</div></div></div>
+    <div class="frow"><div class="fic">${I('lens',22)}</div><div class="flabel"><div class="l">Add-on lens needed?</div><div class="h">Only when the prescription exceeds the wheel's range</div></div>
+      <div class="fctl"><div class="seg" id="w-${p}-addon">${['Yes','No'].map(o=>`<button data-v="${o}" class="${(o==='Yes')===addonOn?'on':''}">${o}</button>`).join('')}</div></div></div>
+    <div class="frow" id="w-${p}-addonpow-wrap" style="display:${addonOn?'flex':'none'}"><div class="fic">${I('lens',22)}</div>
+      <div class="flabel"><div class="l">Add-on power</div></div>
+      <div class="fctl"><select id="w-${p}-addonpow">${opt(LENS_POWERS,e.addOnPower,{'':'—'})}</select></div></div>
+    <div class="frow"><div class="fic">${I('wheel',22)}</div><div class="flabel"><div class="l">Toric correction improves vision?</div><div class="h">Optional — only when it helps</div></div>
+      <div class="fctl"><div class="seg" id="w-${p}-toric">${['Yes','No'].map(o=>`<button data-v="${o}" class="${(o==='Yes')===toricOn?'on':''}">${o}</button>`).join('')}</div></div></div>
+    <div id="w-${p}-toric-wrap" style="display:${toricOn?'block':'none'}">
+      ${fieldNumber('wheel','Toric axis (0–180°)',null,'w-'+p+'-toricaxis',e.toricAxis,0,180)}
+      <div class="frow"><div class="fic">${I('lens',22)}</div><div class="flabel"><div class="l">Toric power</div></div>
+        <div class="fctl"><select id="w-${p}-toricpow">${opt(LENS_POWERS,e.toricPower,{'':'—'})}</select></div></div>
+    </div>`;
+}
+function readEyeForm(p){
+  const lensType=$('#w-'+p+'-type').value;
+  const colourTestResult=$('#w-'+p+'-colour').value;
+  const read9=segVal('w-'+p+'-read9'), improved=segVal('w-'+p+'-improved');
+  const addonV=segVal('w-'+p+'-addon'), toricV=segVal('w-'+p+'-toric');
+  if(!lensType || !colourTestResult || !read9 || !improved || !addonV || !toricV) return {error:'Complete every field for this eye'};
+  if((lensType==='Plus'||lensType==='Minus') && !$('#w-'+p+'-sph').value) return {error:'Select the spherical component'};
+  const addOnUsed=addonV==='Yes';
+  if(addOnUsed && !$('#w-'+p+'-addonpow').value) return {error:'Select the add-on power'};
+  const toricUsed=toricV==='Yes';
+  const toricAxis=toricUsed?+$('#w-'+p+'-toricaxis').value:null;
+  if(toricUsed && (!$('#w-'+p+'-toricpow').value || !Number.isInteger(toricAxis) || toricAxis<0 || toricAxis>180)) return {error:'Toric power and axis (0–180°) are required'};
+  const eye={
+    lensType, spherePower:(lensType==='Plus'||lensType==='Minus')?$('#w-'+p+'-sph').value:null,
+    addOnUsed, addOnPower:addOnUsed?$('#w-'+p+'-addonpow').value:null,
+    colourTestResult, canReadLine9OrSmaller:read9==='Yes', visionImproved:improved==='Yes',
+    postWheelLine:null, postWheelBonusLetters:0, postWheelLogMAR:null,
+    toricUsed, toricPower:toricUsed?$('#w-'+p+'-toricpow').value:null, toricAxis
+  };
+  eye.bestLens=bestLensLabel(eye);
+  return {eye};
 }
 function saveWheel(){
-  const s=state.sessions[state.activeId]; const pd=+$('#w-pd').value;
+  const s=state.sessions[state.activeId]; if(!canCompleteStep(s,'Wheel')){ backToBase(); return; }
+  const pd=+$('#w-pd').value;
   if(!(pd>=52&&pd<=78)){ toast('PD must be between 52 and 78','warn'); return; }
-  const rType=$('#w-rtype').value, lType=$('#w-ltype').value;
-  if(!rType||!lType){ toast('Select best lens type for both eyes','warn'); return; }
-  s.wheel={ pd, rType, rPower:$('#w-rpow').value, rTwoColour:$('#w-r2c').value,
-            lType, lPower:$('#w-lpow').value, lTwoColour:$('#w-l2c').value };
-  s.version++; s._stepLabel='Wheel done'; advance(s);
+  const r=readEyeForm('r'), l=readEyeForm('l');
+  if(r.error){ toast('Right eye: '+r.error,'warn'); return; }
+  if(l.error){ toast('Left eye: '+l.error,'warn'); return; }
+  s.wheel={ pd, right:r.eye, left:l.eye, testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime() };
+  s.version++; s._stepLabel='Wheel test done'; recordBackendEvent('Wheel', s, 'Wheel'); advance(s);
 }
 
-/* ============================ PADDLE — single purpose: preferred reading power ============================ */
+/* ============================ PADDLE — preferred reading power ============================ */
+/* Paddle is reachable only because the Near pre-test failed (enforced centrally
+   by the decision engine) — age never triggers or gates this step. The age
+   suggestion is guidance only; the client's preference always overrides it,
+   and the tester must confirm a final power either way. */
 function ScreenPaddle(){
   const s=guardStep('Paddle'); if(!s) return;
   const p=s.paddle||(s.paddle={});
+  const ageBand=(s.intake||{}).ageBand;
+  const sug=suggestPaddlePower(ageBand);
   screenEl().innerHTML=`<div class="pad pb">
     ${header(s.id)}
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Paddle', s)}
-    <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Paddle test · preferred reading power</div><div class="s">Saved on this device</div></div></div>
+    <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Paddle test · preferred reading power</div><div class="s">Required because Near vision failed</div></div></div>
 
-    ${instructionCard(nearPaddleGraphic(),'Find the preferred reading power','While looking through the wheel lenses at the near vision chart, use the paddle to find the reading power the client prefers.')}
-
-    <div class="vfield">
-      <div class="vhead"><div class="fic">${I('paddle',22)}</div><div class="l">Preferred reading lens power</div></div>
-      <div class="vctl"><select id="p-power" class="full" onchange="document.getElementById('p-add').textContent=this.value||'—'">${opt(PADDLE_POWERS,p.power,{'':'Choose power…'})}</select></div>
-    </div>
+    ${instructionCard(nearPaddleGraphic(),'Find the preferred reading power','While looking through the wheel lenses (if used) at the near vision chart, use the paddle to find the reading power the client prefers.')}
 
     <div class="resultbar">
-      <div class="rl"><span class="lab">${I('check',16,'#1cc3d6')} Recommended near add</span><span class="sub">From preferred paddle power</span></div>
-      <div class="readout" id="p-add">${p.power||'—'}</div>
+      <div class="rl"><span class="lab">${I('info',16,'#1cc3d6')} Age-based suggestion</span><span class="sub">Age band ${ageBand||'—'} · guidance only</span></div>
+      <div class="readout" style="font-size:13px">${sug.power||sug.note}</div>
     </div>
+
+    <div class="vfield">
+      <div class="vhead"><div class="fic">${I('paddle',22)}</div><div class="l">Client's preferred power (if different)</div></div>
+      <div class="vctl"><select id="p-pref" class="full">${opt(PADDLE_POWERS,p.clientPreference,{'':'Same as suggestion / none stated'})}</select></div>
+    </div>
+    <div class="vfield">
+      <div class="vhead"><div class="fic">${I('check',22)}</div><div class="l">Final selected power (tester confirms)</div></div>
+      <div class="vctl"><select id="p-power" class="full">${opt(PADDLE_POWERS,p.selectedPower,{'':'Choose final power…'})}</select></div>
+    </div>
+    <div class="hint">The client's preference always overrides the age suggestion. The final power shown above is what will be dispensed.</div>
 
     <div class="frow" style="align-items:flex-start"><div class="fic">${I('note',22)}</div>
       <div class="flabel" style="width:100%"><div class="l">Notes <span style="color:var(--dim);font-weight:600">(optional)</span></div>
       <input id="p-notes" class="full" style="margin-top:9px" type="text" placeholder="Clinical notes only…" value="${p.notes||''}">
       <div class="h" style="margin-top:7px">Do not enter names, phone numbers or personal details.</div></div></div>
   </div>
-  <div class="btn-row"><button class="btn btn-primary" onclick="savePaddle()">Save &amp; show next step ${I('arrowR',22)}</button></div>`;
+  <div class="btn-row"><button class="btn btn-primary" onclick="savePaddle()">Save — Dispensing checked next ${I('arrowR',22)}</button></div>`;
 }
 function savePaddle(){
-  const s=state.sessions[state.activeId]; const power=$('#p-power').value;
-  if(!power){ toast('Select preferred reading lens power','warn'); return; }
-  s.paddle={power, recommendedAdd:power, notes:$('#p-notes').value}; s.version++; s._stepLabel='Paddle done'; advance(s);
+  const s=state.sessions[state.activeId]; if(!canCompleteStep(s,'Paddle')){ backToBase(); return; }
+  const selectedPower=$('#p-power').value, clientPreference=$('#p-pref').value||null;
+  if(!selectedPower){ toast('Confirm the final selected reading power','warn'); return; }
+  const ageBand=(s.intake||{}).ageBand, sug=suggestPaddlePower(ageBand);
+  s.paddle={
+    ageBand, suggestedPower:sug.power, suggestionNote:sug.note,
+    clientPreference, selectedPower,
+    preferenceOverrodeSuggestion: !!clientPreference && clientPreference!==sug.power,
+    notes:$('#p-notes').value,
+    testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime()
+  };
+  s.version++; s._stepLabel='Paddle test done'; recordBackendEvent('Paddle', s, 'Paddle'); advance(s);
 }
 
-/* ============================ DISPENSE (faithful to hi-fi screen 3) ============================ */
+/* ============================ DISPENSE ============================ */
+/* Gated route-specifically by DE.canDispense (never available on route "none").
+   Displays ONLY values actually recorded at Wheel/Paddle — no hard-coded CYL,
+   AXIS or lens material. No automated inventory management. */
 function ScreenDispense(){
   const s=guardStep('Dispense'); if(!s) return;
-  // belt-and-braces: never render dispense before required testing is complete
-  if(!DE.canDispense(s) && s.status!=='Finalised'){
+  if(!DE.canDispense(s) && !DE.isDispenseComplete(s)){
     go(baseScreen()); showWrongStationModal(s); return;
   }
-  const rx=buildRx(s); const finalised=s.status==='Finalised';
+  const route=computeRoute(s);
+  const wheelUsed = route==='wheel_only' || route==='wheel_then_paddle';
+  const paddleUsed = route==='paddle_only' || route==='wheel_then_paddle';
+  const finalised = DE.isDispenseComplete(s);
+  const d=s.dispense||{};
   screenEl().innerHTML=`<div class="pad pb">
     ${header(s.id)}
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
@@ -1275,55 +1765,63 @@ function ScreenDispense(){
 
     <div class="statusblock">
       <div class="ok">${I('check',26,'#4ade80')}</div>
-      <div><h2>${finalised?'Glasses confirmed':'Ready to dispense'}</h2><p>Review and confirm glasses for client ${s.id}.</p></div>
+      <div><h2>${finalised?'Dispensing recorded':'Ready to dispense'}</h2><p>Review recorded results and confirm glasses for client ${s.id}.</p></div>
     </div>
 
     ${clientContext(s)}
 
     <div class="card sumcard">
-      <div style="font-weight:800;font-size:18px;padding:14px 0 4px">Test results summary</div>
-      ${sumRow('glasses','#1d8aa6','Distance result','No glasses · Distance station', rx.distanceLabel, rx.distanceSnellen,'#1cc3d6')}
-      ${rx.wheelDone? sumRow('wheel','#1d8aa6','Wheel result','Cylinder','With astigmatism', rx.cyl,'#fff') : ''}
-      ${sumRow('paddle','#7a52c0','Near vision result','Paddle', rx.add?'Reading add':'No add needed', rx.addVal,'#fff')}
-      ${sumRow('lens','#1d8aa6','Lens recommendation','Single vision'+(rx.add?' with near add':''), rx.recType, rx.material,'#fff')}
+      <div style="font-weight:800;font-size:18px;padding:14px 0 4px">Recorded test results</div>
+      ${sumRow('glasses','#1d8aa6','Distance (unaided)','Right · Left', acuityLabel(s.distance.rightUnaided.lineReached,s.distance.rightUnaided.bonusLetters), acuityLabel(s.distance.leftUnaided.lineReached,s.distance.leftUnaided.bonusLetters),'#1cc3d6')}
+      ${sumRow('glasses','#1d8aa6','Near (unaided)','Both eyes', acuityLabel(s.near.unaided.lineReached,s.near.unaided.bonusLetters), '', '#1cc3d6')}
+      ${paddleUsed && s.paddle? sumRow('paddle','#7a52c0','Paddle — final power','Suggested: '+(s.paddle.suggestedPower||s.paddle.suggestionNote||'—'), s.paddle.selectedPower, s.paddle.preferenceOverrodeSuggestion?'Client preference used':'','#fff') : ''}
     </div>
 
-    <div class="sec" style="margin:24px 2px 10px"><h2>Prescription to dispense</h2></div>
+    ${wheelUsed?`<div class="sec" style="margin:24px 2px 10px"><h2>Recorded Wheel result</h2></div>
     <div class="card rx">
       <div>
-        <h4><span class="marker m-r"></span>Right Eye (OD)</h4>
+        <h4><span class="marker m-r"></span>Right Eye</h4>
         <div class="rxgrid">
-          ${rxCell('SPH',rx.rSph)}${rxCell('CYL',rx.rCyl)}${rxCell('AXIS',rx.rAxis)}${rxCell('ADD',rx.rAdd)}
+          ${rxCell('Lens',s.wheel.right.lensType)}${rxCell('Sphere',s.wheel.right.spherePower||'—')}${rxCell('Add-on',s.wheel.right.addOnUsed?s.wheel.right.addOnPower:'—')}${rxCell('Toric',s.wheel.right.toricUsed?(s.wheel.right.toricPower+' @ '+s.wheel.right.toricAxis+'°'):'—')}
         </div>
-        <div class="selected-lens"><div class="k">Selected lens</div>
-          <div class="lens-r">Stock S${rx.rSph} C${rx.rCyl} AX 10 ADD ${rx.rAdd}</div></div>
+        <div class="selected-lens"><div class="k">Best lens (recorded components)</div><div class="lens-r">${bestLensLabel(s.wheel.right)}</div></div>
       </div>
       <div>
-        <h4><span class="marker m-l"></span>Left Eye (OS)</h4>
+        <h4><span class="marker m-l"></span>Left Eye</h4>
         <div class="rxgrid">
-          ${rxCell('SPH',rx.lSph)}${rxCell('CYL',rx.lCyl)}${rxCell('AXIS',rx.lAxis)}${rxCell('ADD',rx.lAdd)}
+          ${rxCell('Lens',s.wheel.left.lensType)}${rxCell('Sphere',s.wheel.left.spherePower||'—')}${rxCell('Add-on',s.wheel.left.addOnUsed?s.wheel.left.addOnPower:'—')}${rxCell('Toric',s.wheel.left.toricUsed?(s.wheel.left.toricPower+' @ '+s.wheel.left.toricAxis+'°'):'—')}
         </div>
-        <div class="selected-lens"><div class="k">Selected lens</div>
-          <div class="lens-l">Stock S${rx.lSph} C${rx.lCyl} AX 180 ADD ${rx.lAdd}</div></div>
+        <div class="selected-lens"><div class="k">Best lens (recorded components)</div><div class="lens-l">${bestLensLabel(s.wheel.left)}</div></div>
       </div>
     </div>
+    <div class="hint">Spherical total = sphere + add-on power. Toric power/axis are kept as separate components — the full best-lens combination formula is not in the supplied source and is not fabricated here.</div>`:''}
+
+    ${finalised?`<div class="frow"><div class="fic">${I('note',22)}</div><div class="flabel"><div class="l">Frame size / colour</div><div class="h">${d.frameSize||'—'} ${d.frameColour?'· '+d.frameColour:''}</div></div></div>`
+      : `${fieldSelect('note','Frame size (optional)',null,'dp-size',['','Small','Medium','Large'],d.frameSize)}
+         ${fieldSelect('note','Frame colour (optional)',null,'dp-colour',['','Black','Tortoise','Blue','Clear','Other'],d.frameColour)}`}
 
     <div class="card qrcard" onclick="showHandoverQR('${s.id}')">
       <div class="ic sq" style="background:var(--chip);width:54px;height:54px">${I('qrshow',28)}</div>
-      <div class="grow"><div class="t">Transfer summary</div><div class="s">Show this QR code on another device to transfer the full session summary.</div></div>
+      <div class="grow"><div class="t">Transfer summary</div><div class="s">Show this QR code on another device to transfer the routing token.</div></div>
       <span class="chev">${I('chevR',22,'#a7add9')}</span>
     </div>
   </div>
   <div class="btn-row">
     <button class="btn btn-primary" ${finalised?'disabled':''} onclick="confirmGlasses()">${I('check',22)} ${finalised?'Confirmed':'Confirm glasses given'}</button>
-    <button class="btn btn-secondary" onclick="saveForSync()">${I('cloudup',22,'#fff')} Save for sync later</button>
-    ${privacy('Only anonymous ID '+s.id+'. Session will sync when internet returns.')}
+    ${finalised?`<button class="btn btn-secondary" onclick="saveForSync()">${I('cloudup',22,'#fff')} Save for sync later</button>`:''}
+    ${privacy('Only anonymous ID '+s.id+'. No inventory is checked automatically.')}
   </div>`;
 }
 function confirmGlasses(){
-  const s=state.sessions[state.activeId];
-  s.dispense={glassesDispensed:true,status:'Given',dispensedAt:nowTime()};
+  const s=state.sessions[state.activeId]; if(!DE.canDispense(s)) return;
+  s.dispense={
+    glassesDispensed:true,
+    frameSize:$('#dp-size')?$('#dp-size').value||null:null,
+    frameColour:$('#dp-colour')?$('#dp-colour').value||null:null,
+    testerId:state.tester.testerId, deviceId:state.device, completedAt:nowTime()
+  };
   s.status='Finalised'; s.version++;
+  recordBackendEvent('Dispense', s, 'Dispense');
   // honey rewards completing the dispensing station's workflow task,
   // not the clinical outcome — the drop is earned whether or not glasses suit
   const r=awardHoney();
@@ -1342,7 +1840,48 @@ function saveForSync(){
 }
 
 /* ============================ SYNC QUEUE ============================ */
+/* Real sync status when a backend is configured (js/sync-service.js);
+   falls back to the original simulated queue in demo mode. */
 function ScreenSync(){
+  if(!window.OOXII_CONFIG_VALID || isDemoModeUrl()) return ScreenSyncDemo();
+  screenEl().innerHTML=`<div class="pad pb">
+    ${navBar('home')}
+    <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync queue</h1><p>Checking pending records…</p></div></div>
+  </div>`;
+  window.OOXII_SYNC.getSyncStatus().then(renderSyncStatus);
+}
+function renderSyncStatus(status){
+  const rows=[
+    ['Pending', status.pendingCount, 's-waiting', '#f5b945'],
+    ['Failed (retrying)', status.failedCount, 's-error', '#f06a7a'],
+    ['Conflicts needing review', status.conflictedCount, 's-blocked', '#f06a7a'],
+  ];
+  screenEl().innerHTML=`<div class="pad pb">
+    ${navBar('home')}
+    <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync queue</h1>
+      <p>${status.lastSyncAt?('Last synced '+new Date(status.lastSyncAt).toLocaleTimeString()):'Not synced yet on this device'}</p></div></div>
+    ${!navigator.onLine?`<div class="notice warn" style="margin-top:20px"><span class="x">${I('warn',22,'#f5b945')}</span><div><div class="t">Offline</div><div class="s">Records stay safe on this device and upload automatically once you're back online. Testing is never interrupted.</div></div></div>`:''}
+    ${status.blocked?`<div class="notice" style="margin-top:14px"><span class="x">${I('warn',22,'#f06a7a')}</span><div><div class="t">Sync paused</div><div class="s">${status.blockedReason}</div></div></div>`:''}
+    <div class="card sumcard" style="margin-top:14px">
+      ${rows.map(([label,n,cls,dot])=>`<div class="sumrow"><div class="txt"><div class="a">${label}</div></div>
+        <div class="val"><span class="statpill ${cls}"><span class="dot" style="background:${dot}"></span>${n}</span></div></div>`).join('')}
+    </div>
+    ${status.conflictedCount?`<div class="hint">Conflicts are never auto-resolved — a coordinator reviews them in Supabase (sync_conflicts table).</div>`:''}
+    <button class="btn btn-primary" style="margin-top:14px" onclick="manualSyncNow()">${I('cloud',22)} Sync now</button>
+    ${privacy()}
+  </div>`;
+}
+async function manualSyncNow(){
+  if(!navigator.onLine){ toast('No internet connection right now','warn'); return; }
+  toast('Syncing…','cloud');
+  const r=await window.OOXII_SYNC.syncNow();
+  if(r.ok){ toast(r.pushed+' record'+(r.pushed===1?'':'s')+' synced'); }
+  else if(r.reason==='session_expired'){ toast('Your session expired — sign in online again','warn'); }
+  else { toast('Could not sync — will retry automatically','warn'); }
+  go(ScreenSync);
+}
+/* ---- demo-mode fallback (no backend configured) ---- */
+function ScreenSyncDemo(){
   const items = state.sync.map(id=>{
     const s=state.sessions[id]; const st=s.syncStatus||'Queued';
     return `<div class="row" style="cursor:default">
@@ -1352,8 +1891,8 @@ function ScreenSync(){
     </div>`;}).join('');
   screenEl().innerHTML=`<div class="pad pb">
     ${navBar('home')}
-    <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync queue</h1><p>${state.sync.length} finalised session${state.sync.length===1?'':'s'} waiting</p></div></div>
-    <div class="notice warn" style="margin-top:20px"><span class="x">${I('warn',22,'#f5b945')}</span><div><div class="t">No internet at camp</div><div class="s">Sessions stay safe on this device and upload automatically when internet returns. Testing is never interrupted.</div></div></div>
+    <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync queue (demo)</h1><p>${state.sync.length} finalised session${state.sync.length===1?'':'s'} waiting</p></div></div>
+    <div class="notice warn" style="margin-top:20px"><span class="x">${I('warn',22,'#f5b945')}</span><div><div class="t">No backend connected</div><div class="s">This is a simulated queue — see SUPABASE_SETUP.md to connect a real project.</div></div></div>
     <div style="margin-top:8px">${items||'<div class="card" style="padding:22px;text-align:center;color:var(--dim)">Nothing queued yet.</div>'}</div>
     ${state.sync.length?`<button class="btn btn-primary" style="margin-top:14px" onclick="simulateSync()">${I('cloud',22)} Simulate “internet returned”</button>`:''}
     ${privacy()}
@@ -1361,8 +1900,8 @@ function ScreenSync(){
 }
 function simulateSync(){
   state.sync.forEach(id=> state.sessions[id].syncStatus='Syncing');
-  go(ScreenSync); toast('Syncing in background…','cloud');
-  setTimeout(()=>{ state.sync.forEach(id=> state.sessions[id].syncStatus='Synced'); go(ScreenSync); toast('All sessions synced'); },1500);
+  go(ScreenSyncDemo); toast('Syncing in background…','cloud');
+  setTimeout(()=>{ state.sync.forEach(id=> state.sessions[id].syncStatus='Synced'); go(ScreenSyncDemo); toast('All sessions synced'); },1500);
 }
 
 /* ============================ SEARCH CLIENT (anonymous ID only) ============================ */
@@ -1392,34 +1931,69 @@ function ScreenSearchClient(){
   inp.addEventListener('keydown',e=>{ if(e.key==='Enter') searchClient(); });
   inp.focus();
 }
-function searchClient(){
+/* Local-first, IndexedDB always checked first so this works offline; when
+   online it's enhanced with a scoped server lookup — see
+   OOXII_BACKEND.searchClient() for the merge/status logic. All DB access
+   (IndexedDB and Supabase) lives there, not here. */
+async function searchClient(){
   const id=$('#sc-id').value.trim().toUpperCase();
   const err=$('#sc-err'), out=$('#sc-result');
   err.style.display='none'; out.innerHTML='';
+  window.__lastSearchResult = null;
   if(!acceptableId(id)){ err.style.display='block'; err.textContent='Not a valid anonymous ID. Format: letter, two digits, dash, check letter (A47-K).'; return; }
-  const s=state.sessions[id];
-  if(!s){ err.style.display='block'; err.textContent='No client '+id+' on this device.'; return; }
-  out.innerHTML=searchResultCard(s);
+
+  if(!window.OOXII_BACKEND){ // demo/no-backend fallback: local state only
+    const s=state.sessions[id];
+    if(!s){ err.style.display='block'; err.textContent='No client '+id+' on this device.'; return; }
+    out.innerHTML=searchResultCard(s,'local_only');
+    return;
+  }
+  out.innerHTML='<div class="hint">Searching…</div>';
+  const result = await window.OOXII_BACKEND.searchClient(id);
+  if(!result){ out.innerHTML=''; err.style.display='block'; err.textContent='No client '+id+' found on this device or in your festival.'; return; }
+  window.__lastSearchResult = result;
+  out.innerHTML=searchResultCard(result.session, result.syncStatus);
+}
+const SYNC_STATUS_LABEL = {
+  local_only: ['Local only', 's-offline'], pending: ['Pending sync', 's-waiting'],
+  synced: ['Synced', 's-ready'], conflicted: ['Conflicted', 's-blocked'], finalised: ['Finalised', 's-received'],
+};
+/* Opens a search result the same way any other client is opened — through
+   the central station gate — after making sure a server-only find (never
+   seen on this device before) is first written into state.sessions/IndexedDB
+   so the unchanged clinical screens have something to read from. */
+async function openSearchResult(clientId){
+  const result=window.__lastSearchResult;
+  if(!result || result.session.id!==clientId) return;
+  if(!state.sessions[clientId]){
+    state.sessions[clientId]=result.session;
+    if(!state.queue.includes(clientId)) state.queue.unshift(clientId);
+    if(result.source==='server' && window.OOXII_DB) await window.OOXII_DB.sessions.put(result.session);
+  }
+  openSessionForActiveStation(state.sessions[clientId]);
 }
 /* last station whose work is complete, derived from existing DE checks */
 function lastCompletedStation(s){
-  if(s.exit && s.exit.done) return stationLabel('Exit');
-  if(s.status==='Finalised') return stationLabel('Dispense');
+  if(DE.isExitComplete(s)) return stationLabel('Exit');
+  if(DE.isDispenseComplete(s)) return stationLabel('Dispense');
   if(DE.isPaddleComplete(s)) return stationLabel('Paddle');
   if(DE.isWheelComplete(s))  return stationLabel('Wheel');
+  if(DE.isNearComplete(s)) return 'Near test';
   if(DE.isDistanceComplete(s)) return stationLabel('Distance');
   if(DE.isIntakeComplete(s)) return stationLabel('Registration');
   return '—';
 }
-function searchResultCard(s){
+function searchResultCard(s, syncStatus){
   const req=getRequiredStation(s);
   const canOpen=canActiveTesterOpenSession(s);
   const active=getActiveTesterStation();
-  const nextTxt = s.status==='Finalised' ? 'Exit / counselling' : getRequiredStep(s);
+  const nextTxt = stepLabel(getRequiredStep(s));
+  const [syncLabel, syncCls] = SYNC_STATUS_LABEL[syncStatus] || ['Local only','s-offline'];
   return `<div class="card" style="padding:18px">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <div class="readout" style="font-size:20px;min-width:auto">${s.id}</div>
       <span class="statpill ${pillClass(s.status)}">${s.status}</span>
+      <span class="statpill ${syncCls}">${syncLabel}</span>
       <span class="time" style="margin-left:auto">Updated ${s.time||'—'}</span>
     </div>
     <div class="ctxgrid" style="margin-top:14px">
@@ -1428,8 +2002,10 @@ function searchResultCard(s){
       ${ctxCell('Last completed',lastCompletedStation(s))}
       ${ctxCell('Your station',activeContextLabel())}
     </div>
+    ${syncStatus==='conflicted'?`<div class="notice" style="margin:14px 0 0"><span class="x">${I('warn',20,'#f06a7a')}</span>
+        <div><div class="t">Sync conflict</div><div class="s">This client has a conflict awaiting coordinator review — data shown may not be current. See BACKEND_TEST_PLAN.md.</div></div></div>`:''}
     ${canOpen
-      ?`<button class="btn btn-primary" style="margin-top:16px" onclick="openSessionById('${s.id}')">Open client ${I('arrowR',20)}</button>`
+      ?`<button class="btn btn-primary" style="margin-top:16px" onclick="openSearchResult('${s.id}')">Open client ${I('arrowR',20)}</button>`
       :`<div class="notice" style="margin:16px 0 0"><span class="x">${I('warn',20,'#f06a7a')}</span>
           <div><div class="t">Not for your station</div>
           <div class="s">This client needs <b style="color:#fff">${stationLabel(req)}</b>. You are working at <b style="color:#fff">${activeContextLabel()}</b>. Please direct the client to ${stationLabel(req)}.</div></div></div>
@@ -1464,8 +2040,8 @@ function ScreenIndividual(){
   const t=state.tester;
   const clients=state.queue.map(id=>state.sessions[id]).filter(Boolean);
   const rows=clients.map(s=>{
-    const finished=!!(s.exit&&s.exit.done);
-    const nextTxt=s.status==='Finalised'?(finished?'Finished':'Exit / counselling'):getRequiredStep(s);
+    const finished=DE.getNextRequiredStep(s)==='Complete';
+    const nextTxt=finished?'Finished':stepLabel(getRequiredStep(s));
     return `<div class="row" ${finished?'style="cursor:default;opacity:.6"':`onclick="openSessionById('${s.id}')" role="button" tabindex="0" onkeydown="if(event.key==='Enter')openSessionById('${s.id}')"`}>
       <div class="ic" style="background:${finished?'var(--chip)':'rgba(74,222,128,.14)'};border:1px solid ${finished?'transparent':'rgba(74,222,128,.4)'}">${I(finished?'check':'arrowDn',22,'#4ade80')}</div>
       <div class="grow"><div class="name">${s.id}</div><div class="sub">${finished?'All done':'Next: '+nextTxt}</div></div>
@@ -1500,8 +2076,13 @@ function ScreenIndividual(){
 
 /* ============================ EYE FESTIVAL MODE — station selection ============================ */
 function ScreenFestival(){
+  const restricted = stationRestrictionActive();
+  const allowed = allowedStationsForTester(); // null=all, []=none, [...]=subset
+  if(restricted && allowed.length===0) return renderNoFestivalAssignment();
+
   const active=getActiveTesterStation();
-  const cards=STATIONS.map(st=>`
+  const visible = allowed===null ? STATIONS : STATIONS.filter(st=>allowed.includes(st.key));
+  const cards=visible.map(st=>`
     <button class="station-card ${active===st.key?'on':''}" onclick="pickStation('${st.key}')"
       aria-pressed="${active===st.key}" aria-label="Work at the ${st.label} station">
       <div class="st-ic" style="background:${st.col}">${I(st.icon,28)}</div>
@@ -1509,18 +2090,53 @@ function ScreenFestival(){
       <div class="st-s">${st.sub}</div>
       ${active===st.key?`<span class="statpill s-ready"><span class="dot"></span>Your station</span>`:''}
     </button>`).join('');
+  const ctx = restricted ? window.OOXII_BACKEND.getCachedContext() : null;
+  const multiFestival = ctx && ctx.festivals && ctx.festivals.length>1;
   screenEl().innerHTML=`<div class="pad pb">
     ${navBar('festival')}
     <button class="back" onclick="go(ScreenHome)">${I('back',18,'#a7add9')} Home</button>
     <div class="camp"><div class="camp-ic">${I('eye',26)}</div>
       <div><h1>Eye Festival Mode</h1>
       <p>${isIndividualMode()?'You are in individual testing. Pick a station to join the festival flow.':(active?'You are at '+stationLabel(active)+'. Continue, or tap another station to change.':'Which station are you working at today?')}</p></div></div>
+    ${multiFestival?`<div class="frow" style="margin-top:16px"><div class="fic">${I('eye',20)}</div>
+      <div class="flabel"><div class="l">Festival</div><div class="h">You're assigned to ${ctx.festivals.length} festivals</div></div>
+      <div class="fctl"><select onchange="switchActiveFestival(this.value)">${ctx.festivals.map(f=>`<option value="${f.festivalId}" ${f.festivalId===ctx.activeFestivalId?'selected':''}>${f.festivalName}</option>`).join('')}</select></div></div>`:''}
     <div class="station-grid">${cards}</div>
     ${active?`<button class="btn btn-primary" style="margin-top:18px" onclick="go(ScreenFestivalDashboard)">Continue at ${stationLabel(active)} ${I('arrowR',20)}</button>`:''}
-    <div class="hint">Near vision is tested at the Distance station — it has no station of its own.</div>
+    <div class="hint">Near vision is tested at the Distance station — it has no station of its own.${restricted?' You only see stations you\'re assigned to for this festival.':''}</div>
   </div>`;
 }
+/* shown when a signed-in tester (real backend, not demo) has no active
+   festival membership, or their membership grants zero stations */
+function renderNoFestivalAssignment(){
+  screenEl().innerHTML=`<div class="pad">
+    ${navBar('festival')}
+    <div class="camp" style="margin-top:34px">
+      <div class="camp-ic" style="background:linear-gradient(160deg,#f5b945,#b98a1f)">${I('warn',26)}</div>
+      <div><h1>No station assignment</h1><p>You're not assigned to any station for this festival yet</p></div>
+    </div>
+    <div class="notice warn" style="margin-top:20px"><span class="x">${I('warn',22,'#f5b945')}</span>
+      <div><div class="t">Ask a coordinator for access</div>
+      <div class="s">A coordinator needs to add you to a festival's tester roster with at least one allowed station before you can work in Eye Festival Mode.</div></div></div>
+    <button class="btn btn-secondary" onclick="go(ScreenHome)">${I('home',20,'#fff')} Return home</button>
+  </div>`;
+}
+/* the ONLY entry point for changing station — checked here so neither a
+   filtered-out UI button NOR a direct console call (pickStation('Wheel'))
+   can select a station outside the tester's real allowed_stations. This is
+   a client-side convenience on top of the real boundary: apply_session_event()
+   independently re-checks festival_members.allowed_stations server-side for
+   every event, so this check being bypassed would still not grant any access. */
 function pickStation(key){
+  if(!isStationAllowed(key)){
+    scrim(`<div class="modal">
+      <div class="ic sq" style="background:rgba(240,106,122,.12);border:1px solid rgba(240,106,122,.4);width:60px;height:60px;margin:0 auto 12px">${I('warn',30,'#f06a7a')}</div>
+      <h3>Not your station</h3>
+      <p>You are not assigned to the <b style="color:#fff">${stationLabel(key)}</b> station for this festival. Ask a coordinator if this should change.</p>
+      <button class="btn btn-primary" onclick="closeScrim()">OK</button>
+    </div>`);
+    return;
+  }
   const old=getActiveTesterStation();
   if(isIndividualMode()){
     scrim(`<div class="modal">
@@ -1567,18 +2183,20 @@ function ScreenFestivalDashboard(){
       onkeydown="if(event.key==='Enter')openSessionById('${s.id}')">
       <div class="ic" style="background:rgba(74,222,128,.14);border:1px solid rgba(74,222,128,.4)">${I('arrowDn',22,'#4ade80')}</div>
       <div class="grow"><div class="name">${s.id}</div>
-        <div class="sub">Needs: ${s.status==='Finalised'?'Exit / counselling':getRequiredStep(s)}</div></div>
+        <div class="sub">Needs: ${stepLabel(getRequiredStep(s))}</div></div>
       <span class="statpill ${pillClass(s.status)}"><span class="dot" style="background:${queueDot(s.status)}"></span>${s.status}</span>
       <span class="time">${s.time||''}</span>
       <span class="chev">${I('chevR',18,'#7c83b4')}</span>
     </div>`).join('');
-  const doneRows=done.map(s=>`
-    <div class="row" style="cursor:default">
+  const doneRows=done.map(s=>{
+    const next=DE.getNextRequiredStep(s);
+    const sub = next==='Complete' ? 'Finished' : 'Now needs: '+stationLabel(getRequiredStation(s));
+    return `<div class="row" style="cursor:default">
       <div class="ic" style="background:var(--chip)">${I('check',22,'#4ade80')}</div>
       <div class="grow"><div class="name">${s.id}</div>
-        <div class="sub">${s.status==='Finalised'&&st!=='Exit'&&st!=='Dispense'?'Finished':('Now needs: '+stationLabel(getRequiredStation(s)))}</div></div>
+        <div class="sub">${sub}</div></div>
       <span class="time">${s.time||''}</span>
-    </div>`).join('');
+    </div>`;}).join('');
   screenEl().innerHTML=`<div class="tl-wrap">
     ${sidebar()}
     <main class="tl-main">
@@ -1605,28 +2223,36 @@ function ScreenFestivalDashboard(){
   </div>`;
 }
 
-/* ============================ EXIT / COUNSELLING (finalised clients only, read-only) ============================ */
+/* ============================ EXIT / COUNSELLING — no-glasses path ============================ */
+/* Reached ONLY on route "none" (Distance pass + Near pass — see ROUTE_PATHS).
+   Never opens after Wheel/Paddle/Dispensing; those routes finalise at the
+   Dispensing screen instead. Records glasses_dispensed = false explicitly. */
 function ScreenExit(){
-  const s=guardExit(); if(!s) return;
-  const rx=buildRx(s); // PLACEHOLDER prescription mapping — requires OOXii validation (display only here)
-  const exitDone=!!(s.exit&&s.exit.done);
+  const s=guardStep('Exit'); if(!s) return;
+  if(computeRoute(s)!=='none'){ go(baseScreen()); showWrongStationModal(s); return; } // belt-and-braces
+  const exitDone=DE.isExitComplete(s);
   screenEl().innerHTML=`<div class="pad pb">
     ${header(s.id)}
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     <div class="statusblock">
       <div class="ok">${I('check',26,'#4ade80')}</div>
-      <div><h2>Exit &amp; counselling</h2><p>Testing is finished for client ${s.id}. Review, advise, and send them home.</p></div>
+      <div><h2>Exit &amp; counselling</h2><p>Distance and Near vision both passed for client ${s.id}. No glasses are required through this workflow.</p></div>
     </div>
     ${clientContext(s)}
     <div class="card sumcard">
       <div style="display:flex;align-items:center;gap:10px;font-weight:800;font-size:18px;padding:14px 0 4px">
-        Final summary <span class="bothchip">Read-only</span></div>
-      ${sumRow('glasses','#27a98a','Glasses',(s.dispense&&s.dispense.glassesDispensed)?'Dispensed at Dispensing':'Recorded at Dispensing',rx.recType,rx.material,'#fff')}
-      ${sumRow('lens','#1d8aa6','Distance result',rx.distanceLabel,rx.distanceSnellen,'','#1cc3d6')}
+        Pre-test summary <span class="bothchip">Read-only</span></div>
+      ${sumRow('glasses','#27a98a','Distance (unaided)','Right · Left · both passed', acuityLabel(s.distance.rightUnaided.lineReached,s.distance.rightUnaided.bonusLetters), acuityLabel(s.distance.leftUnaided.lineReached,s.distance.leftUnaided.bonusLetters),'#4ade80')}
+      ${sumRow('lens','#1d8aa6','Near (unaided)','Both eyes · passed', acuityLabel(s.near.unaided.lineReached,s.near.unaided.bonusLetters), '', '#4ade80')}
+    </div>
+    <div class="notice" style="background:rgba(74,222,128,.06);border-color:rgba(74,222,128,.28)">
+      <span class="x">${I('shield',22,'#4ade80')}</span>
+      <div><div class="t" style="color:var(--green)">No glasses required</div>
+      <div class="s">Both pre-tests passed the OOXii threshold. Wheel, Paddle and Dispensing were not needed for this client.</div></div>
     </div>
     <div class="instruction">
       <div class="instr-t">Care advice to give</div>
-      <div class="instr-s">• Clean glasses with water and a soft cloth.<br>• Wear them as advised at the festival.<br>• Come back to any OOXii festival if vision changes.</div>
+      <div class="instr-s">• Vision is within the normal range today.<br>• Come back to any OOXii festival if vision changes.</div>
     </div>
   </div>
   <div class="btn-row">
@@ -1634,8 +2260,10 @@ function ScreenExit(){
   </div>`;
 }
 function confirmExit(){
-  const s=state.sessions[state.activeId]; if(!s||s.status!=='Finalised') return;
-  s.exit={done:true,time:nowTime()}; s.version++;
+  const s=state.sessions[state.activeId]; if(!s || computeRoute(s)!=='none' || !DE.isNearComplete(s)) return;
+  s.exit={counsellingDone:true, glassesDispensed:false, testerId:state.tester.testerId, deviceId:state.device, completedAt:nowTime()};
+  s.status='Finalised'; s.version++;
+  recordBackendEvent('Exit', s, 'Exit');
   const r=awardHoney(); // honey: admin/workflow task completion — not outcome-linked
   honeyAfterSave(r,'Exit & counselling complete',()=>go(baseScreen()));
 }
@@ -1653,40 +2281,100 @@ function openScanner(){
     </div>`);
     return;
   }
-  const opts=state.queue.map(id=>{
+  const demo = window.OOXII_QR ? window.OOXII_QR.isDemoMode() : true;
+  const cameraOk = window.OOXII_QR && window.OOXII_QR.cameraSupported();
+  const opts = demo ? state.queue.map(id=>{
     const s=state.sessions[id];
     const ok=canActiveTesterOpenSession(s);
     return `<button class="row" style="width:100%;text-align:left" onclick="simulateScan('${id}')">
       <div class="ic sq" style="background:var(--chip)">${I('qr',22)}</div>
-      <div class="grow"><div class="name">${id}</div><div class="sub">Needs: ${s.status==='Finalised'?'Exit / counselling':DE.getNextRequiredStep(s)}</div></div>
+      <div class="grow"><div class="name">${id}</div><div class="sub">Needs: ${stepLabel(DE.getNextRequiredStep(s))}</div></div>
       <span class="statpill ${ok?'s-ready':'s-needs'}">${ok?'For you':stationLabel(getRequiredStation(s))}</span></button>`;
-  }).join('');
+  }).join('') : '';
   scrim(`<div class="modal" style="max-width:360px">
     <div class="ic sq" style="background:var(--chip);width:64px;height:64px;margin:0 auto 12px">${I('scan',34,'#1cc3d6')}</div>
     <h3>Scan client QR</h3>
-    <p>You are at: <b style="color:#1cc3d6">${activeContextLabel()}</b><br>Point the camera at a handover QR. (Demo: pick a code below to simulate a scan.)</p>
-    <div style="text-align:left;margin-top:6px;max-height:250px;overflow:auto">${opts||'<p style="text-align:center">No codes in range.</p>'}</div>
-    <button class="btn btn-secondary" onclick="simulateScanRaw('%%damaged-qr%%')">Demo: scan a damaged QR</button>
+    <p>You are at: <b style="color:#1cc3d6">${activeContextLabel()}</b></p>
+    ${cameraOk?`<button class="btn btn-primary" onclick="openCameraScanner()">${I('scan',20)} Scan with camera</button>`:''}
+    <button class="btn btn-secondary" onclick="triggerImageUpload()">${I('qrshow',20,'#fff')} Upload QR image</button>
+    ${demo?`<div style="text-align:left;margin-top:14px;max-height:220px;overflow:auto">
+        <div class="hint" style="margin:0 0 8px">Demo mode — pick a code to simulate a scan:</div>
+        ${opts||'<p style="text-align:center">No codes in range.</p>'}
+      </div>
+      <button class="btn btn-secondary" onclick="simulateScanRaw('%%damaged-qr%%')">Demo: scan a damaged QR</button>`:''}
     <button class="btn btn-secondary" onclick="closeScrim()">Cancel</button>
   </div>`);
 }
+/* Real rear-camera scan — permission is requested only now, on tap, never on
+   page load. Stops itself the instant a QR is decoded; every payload (camera,
+   image upload, or the demo picker) funnels through handleScannedPayload(). */
+function openCameraScanner(){
+  scrim(`<div class="modal" style="max-width:380px">
+    <h3>Scan client QR</h3>
+    <p style="margin-bottom:10px">You are at: <b style="color:#1cc3d6">${activeContextLabel()}</b></p>
+    <div id="${window.OOXII_QR.READER_ELEMENT_ID}" style="width:100%;border-radius:14px;overflow:hidden;background:#000;min-height:220px"></div>
+    <div id="cam-scan-err" class="err" style="display:none;margin-top:10px"></div>
+    <button class="btn btn-secondary" onclick="triggerImageUpload()">${I('qrshow',18,'#fff')} Upload QR image instead</button>
+    <button class="btn btn-secondary" onclick="closeScrim()">Cancel</button>
+  </div>`);
+  const errMessages = {
+    permission_denied: 'Camera permission was denied. Allow camera access in your browser, or upload a QR image instead.',
+    no_camera: 'No camera was found on this device. Try uploading a QR image instead.',
+    camera_unsupported: 'Camera scanning is not supported in this browser. Try uploading a QR image instead.',
+    camera_error: 'Could not start the camera. Try uploading a QR image instead.',
+  };
+  window.OOXII_QR.startCameraScan({
+    onDecoded: (text)=>{ closeScrim(); handleScannedPayload(text); },
+    onError: (code)=>{
+      const el=document.getElementById('cam-scan-err');
+      if(el){ el.style.display='block'; el.textContent=errMessages[code]||errMessages.camera_error; }
+    },
+  });
+}
+function triggerImageUpload(){
+  let inp=document.getElementById('qr-file-input');
+  if(!inp){
+    inp=document.createElement('input');
+    inp.type='file'; inp.accept='image/*'; inp.id='qr-file-input'; inp.style.display='none';
+    document.body.appendChild(inp);
+  }
+  inp.value='';
+  inp.onchange=()=>{
+    const file=inp.files[0]; if(!file) return;
+    window.OOXII_QR.scanFromImageFile(file, {
+      onDecoded: (text)=>{ closeScrim(); handleScannedPayload(text); },
+      onError: ()=>{ closeScrim(); showQRError('Could not read a QR code from that image. Try a clearer photo, or scan with the camera.'); },
+    });
+  };
+  inp.click();
+}
 /* single source for the handover QR payload (structure unchanged; tid added — backward compatible) */
+/* QR is a routing token, not the clinical database — only what the next
+   station needs. `fid` (festival id) is a backward-compatible addition: old
+   payloads without it still validate, but a mismatched fid on a configured
+   backend is rejected as "wrong festival". */
 function qrPayloadFor(s){
+  const ctx = window.OOXII_BACKEND ? window.OOXII_BACKEND.getCachedContext() : null;
   return JSON.stringify({
-    v:1, camp:'PVEC-VU', cid:s.id, sid:'uuid-'+s.id,
+    v:1, camp:'PVEC-VU', cid:s.id, sid:'uuid-'+s.id, fid: ctx?ctx.activeFestivalId:null,
     step:DE.getNextRequiredStep(s), status:s.status, ver:s.version, ts:Date.now(),
     dev:state.device, tid:state.tester.testerId, mac:'sig:'+(s.version*7+s.id.length)
   });
 }
 function simulateScan(id){ closeScrim(); handleScannedPayload(qrPayloadFor(state.sessions[id])); }
 function simulateScanRaw(raw){ closeScrim(); handleScannedPayload(raw); }
-/* every scan — real or simulated — passes through here:
-   structural validation first, then the central station gate */
+/* every scan — camera, image upload, or the demo picker — passes through
+   here: schema validation, then festival check, then the central station gate */
 function handleScannedPayload(raw){
   let p=null;
   try{ p=JSON.parse(raw); }catch(e){ /* not JSON — treated as damaged below */ }
   if(!p || p.v!==1 || !p.cid || !acceptableId(p.cid)){
     showQRError('That QR code is damaged or is not an OOXii client code. Nothing was opened.');
+    return;
+  }
+  const ctx = window.OOXII_BACKEND ? window.OOXII_BACKEND.getCachedContext() : null;
+  if(ctx && p.fid && p.fid!==ctx.activeFestivalId){
+    showQRError('This QR code is from a different festival. Nothing was opened.');
     return;
   }
   const s=state.sessions[p.cid];
@@ -1710,19 +2398,15 @@ function showHandoverQR(id, after){
   scrim(`<div class="modal">
     <h3>Handover QR</h3>
     <div class="id-big">${s.id}</div>
-    <p>Next step: <b style="color:#fff">${DE.getNextRequiredStep(s)}</b><br>Scan on the next station's device to continue.</p>
+    <p>Next step: <b style="color:#fff">${stepLabel(DE.getNextRequiredStep(s))}</b><br>Scan on the next station's device to continue.</p>
     <div class="qrbox" id="qr-target"></div>
     <p style="font-size:12px;margin-top:0">No personal data — anonymous clinical workflow only.</p>
     <button class="btn btn-primary" onclick="closeScrim();${after?'__qrAfter()':''}">Done</button>
   </div>`);
   window.__qrAfter = after||null;
   const target=document.getElementById('qr-target');
-  try{
-    if(window.QRCode){ new QRCode(target,{text:payload,width:190,height:190,correctLevel:QRCode.CorrectLevel.M}); }
-    else throw new Error('no lib');
-  }catch(e){
-    target.innerHTML=`<div class="qr-fallback">${payload}</div>`;
-  }
+  if(window.OOXII_QR) window.OOXII_QR.renderQrInto(target, payload);
+  else target.innerHTML=`<div class="qr-fallback">${payload}</div>`;
 }
 
 /* ============================ blocking / info modals ============================ */
@@ -1730,13 +2414,12 @@ function showHandoverQR(id, after){
    no override, no continue-anyway. Actions: scan another / change station / home. */
 function showWrongStationModal(s, requiredStation, note){
   const req = requiredStation || (s ? getRequiredStation(s) : null);
-  const active = getActiveTesterStation();
   scrim(`<div class="modal">
     <div class="ic sq" style="background:rgba(240,106,122,.12);border:1px solid rgba(240,106,122,.4);width:60px;height:60px;margin:0 auto 12px">${I('warn',30,'#f06a7a')}</div>
     <h3>Wrong station</h3>
     ${s?`<div class="id-big">${s.id}</div>`:''}
     <p style="font-size:15px;line-height:1.6">This client needs: <b style="color:#1cc3d6">${stationLabel(req)}</b><br>
-      You are working at: <b style="color:#fff">${active?stationLabel(active):'No station chosen'}</b></p>
+      You are working at: <b style="color:#fff">${activeContextLabel()}</b></p>
     <p>${note||('Please direct the client to the '+stationLabel(req)+' station.')}</p>
     ${s?`<button class="btn btn-primary" onclick="closeScrim();openScanner()">${I('scan',20)} Scan another client</button>`:''}
     <button class="btn ${s?'btn-secondary':'btn-primary'}" onclick="closeScrim();go(ScreenFestival)">Change my station</button>
@@ -1822,16 +2505,21 @@ function fieldNumber(icon,label,help,id,val,min,max){
     <div class="flabel"><div class="l">${label}</div>${help?`<div class="h">${help}</div>`:''}</div>
     <div class="fctl"><input id="${id}" type="number" min="${min}" max="${max}" value="${val||''}" style="width:96px;text-align:center"></div></div>`;
 }
-/* stacked: chart glyph + label on top, full-width line dropdown below, eye colour-coded */
+/* stacked: chart glyph + label on top, full-width line dropdown below, eye colour-coded.
+   Chart lines 0 (top, largest) to 11 (bottom, smallest) per the authoritative table. */
 function fieldEyeLine(label,id,val,eye){
   const badge = eye==='r'?'<span class="eyebadge eye-r">R</span>'
     : eye==='l'?'<span class="eyebadge eye-l">L</span>'
     : '<span class="bothchip">Both eyes</span>';
+  const opts = `<option value="" ${val==null?'selected':''}>Choose line…</option>`+
+    LINE_OPTS.map(n=>`<option value="${n}" ${String(val)===String(n)?'selected':''}>Line ${n} · ${ACUITY_TABLE[n].snellenMetres}</option>`).join('');
   return `<div class="vfield">
     <div class="vhead"><div class="fic">${chartGlyph()}</div><div class="l">${label}</div>${badge}</div>
-    <div class="vctl"><select id="${id}" class="full">${opt(LINE_OPTS.map(n=>n),val,{'':'Choose line…'},'Line ')}</select></div>
+    <div class="vctl"><select id="${id}" class="full">${opts}</select></div>
   </div>`;
 }
+/* read a line select — '' means not chosen; line 0 is a valid answer */
+function lineVal(id){ const v=$('#'+id).value; return v===''?null:parseInt(v,10); }
 /* stacked: label on top, full-width 0–4 scale below (no more overlap) */
 function fieldLetters(label,id,val){
   return `<div class="vfield">
@@ -1846,7 +2534,7 @@ function pickLetters(id,n,el){
 }
 function fieldReadout(label,id,val){
   return `<div class="resultbar">
-    <div class="rl"><span class="lab">${I('check',16,'#1cc3d6')} ${label}</span><span class="sub">Automatic Snellen result</span></div>
+    <div class="rl"><span class="lab">${I('check',16,'#1cc3d6')} ${label}</span><span class="sub">LogMAR · Snellen — system-calculated, not editable</span></div>
     <div class="readout" id="${id}">${val}</div></div>`;
 }
 /* read-only review fields used on the Paddle/summary screen (faithful to hi-fi screen 2) */
@@ -1956,7 +2644,10 @@ function afterStationSave(s){
 /* scrim helpers */
 function scrim(inner){ closeScrim(); const d=document.createElement('div'); d.className='scrim'; d.id='scrim'; d.innerHTML=inner;
   d.addEventListener('click',e=>{ if(e.target===d) closeScrim(); }); document.getElementById('phone').appendChild(d); }
-function closeScrim(){ const d=document.getElementById('scrim'); if(d)d.remove(); }
+function closeScrim(){
+  const d=document.getElementById('scrim'); if(d)d.remove();
+  if(window.OOXII_QR) window.OOXII_QR.stopCameraScan(); // never leave the camera stream running behind a closed modal
+}
 
 /* ============================ navigation bar ============================ */
 function navBar(active='home'){
@@ -1975,7 +2666,28 @@ function navBar(active='home'){
     </div>
   </div>`;
 }
-function doLogout(){state.authed=false; go(ScreenSignIn);}
+/* Sign-out warns about unsynced records before wiping local clinical data —
+   never silently discards work a tester hasn't synced yet. */
+async function doLogout(){
+  if(!window.OOXII_CONFIG_VALID || isDemoModeUrl()){ state.authed=false; go(ScreenSignIn); return; }
+  const r = await window.OOXII_AUTH.signOut({force:false});
+  if(r.needsConfirmation){
+    scrim(`<div class="modal">
+      <div class="ic sq" style="background:rgba(245,185,69,.14);border:1px solid rgba(245,185,69,.4);width:60px;height:60px;margin:0 auto 12px">${I('warn',28,'#f5b945')}</div>
+      <h3>Unsynced records</h3>
+      <p>${r.pendingCount} record${r.pendingCount===1?'':'s'} on this device ${r.pendingCount===1?'has':'have'} not synced yet. Signing out now will make them unavailable until you sign back in on this device.</p>
+      <button class="btn btn-primary" onclick="forceLogout()">Sign out anyway</button>
+      <button class="btn btn-secondary" onclick="closeScrim()">Stay signed in</button>
+    </div>`);
+    return;
+  }
+  state.authed=false; go(ScreenSignIn);
+}
+async function forceLogout(){
+  closeScrim();
+  await window.OOXII_AUTH.signOut({force:true});
+  state.authed=false; go(ScreenSignIn);
+}
 
 /* ============================ PROFILE ============================ */
 function ScreenProfile(){
@@ -1985,8 +2697,13 @@ function ScreenProfile(){
   const nextTier=TIERS[tierIdx+1]||null;
   const progress=nextTier?Math.round(((t.clientsTotal-tier.min)/(nextTier.min-tier.min))*100):100;
   const cellsFilled=Math.min(t.clientsTotal,18);
+  // this-month total: confirmed honey_events + this device's still-pending
+  // awards when signed in against a real backend (see getHoneyTotals());
+  // the all-time Drops/Tier system above stays local-only — out of scope
+  // for the daily/monthly festival-local-date requirement.
+  const monthTotal=getHoneyTotals().month;
   // participation-only achievements (no clinical privileges)
-  const stats={total:t.clientsTotal, sessions:state.honey.sessionDays.length, month:state.honey.monthClients};
+  const stats={total:t.clientsTotal, sessions:state.honey.sessionDays.length, month:monthTotal};
   const unlocked=ACHIEVEMENTS.filter(a=>a.test(stats));
   const locked=ACHIEVEMENTS.filter(a=>!a.test(stats));
   const badgeHTML=(b,lk)=>`<div class="badge-item ${lk?'locked':''}">
@@ -2052,11 +2769,11 @@ function ScreenProfile(){
 function ScreenTutorial(){
   const steps=[
     {icon:'clipboard',title:'Register the client',desc:'Generate an anonymous ID. Enter age band, gender, village, and cataract history. No names or personal data are collected.'},
-    {icon:'glasses',title:'Distance vision test',desc:'Test each eye separately with the Snellen chart. Cover one eye at a time with the palm. Record the smallest line read fully correctly.'},
-    {icon:'wheel',title:'Wheel test (if needed)',desc:'If vision is worse than 6/12 in either eye, use the wheel to find the correct lens. Measure pupillary distance (PD) first.'},
-    {icon:'glasses',title:'Near vision test',desc:'Test both eyes together at near distance. Record the smallest near line read correctly. This step is done at the Distance station.'},
-    {icon:'paddle',title:'Paddle test (if needed)',desc:'Find the preferred reading power. Client looks through the wheel lenses at the near vision card while you hold the paddle.'},
-    {icon:'lens',title:'Dispense glasses',desc:'Review the prescription summary. Confirm the glasses are given. Save the session — it will sync automatically when internet returns.'},
+    {icon:'glasses',title:'Distance pre-test',desc:'Test each eye separately, without glasses. Line 7 or better passes; line 6 or worse fails. If they have distance glasses, also test with those on — required, not optional.'},
+    {icon:'glasses',title:'Near pre-test',desc:'Test both eyes together, without glasses. Line 9 or better passes; line 8 or worse fails. Done at the Distance station, right after Distance. The route is only worked out once both pre-tests are done.'},
+    {icon:'wheel',title:'Wheel test (if Distance failed)',desc:'Per eye: best lens type and power, colour test, add-on and toric only if they help. Measure PD (52–78) first. Never opens before Near is complete.'},
+    {icon:'paddle',title:'Paddle test (if Near failed)',desc:'Find the preferred reading power. Age gives a rough suggestion only — the client\'s own preference always wins, and the tester confirms the final power.'},
+    {icon:'lens',title:'Dispense or Exit/Counselling',desc:'Both pre-tests passed → Exit/Counselling, no glasses needed. Otherwise → Dispensing once every required test (Wheel and/or Paddle) is complete.'},
   ];
   screenEl().innerHTML=`<div class="pad pb">
     ${navBar('tutorial')}
@@ -2082,9 +2799,11 @@ function ScreenTutorial(){
 
 /* ============================ SETTINGS ============================ */
 function ScreenSettings(){
-  // station changes always go through pickStation() → confirmation dialog
+  // station changes always go through pickStation() → confirmation dialog;
+  // only stations this tester is actually assigned to are offered
+  const allowed = allowedStationsForTester(); // null=all, []=none, [...]=subset
   const roleBtns=STATIONS.map(st=>
-    `<button class="roletag ${getActiveTesterStation()===st.key?'on':''}" onclick="pickStation('${st.key}')">${st.label}</button>`).join('');
+    `<button class="roletag ${getActiveTesterStation()===st.key?'on':''}" onclick="pickStation('${st.key}')" ${allowed&&!allowed.includes(st.key)?'disabled':''}>${st.label}</button>`).join('');
   const settRow=(icon,label,val)=>`<div class="sumrow">
     <div class="ic" style="background:var(--chip);width:40px;height:40px">${I(icon,20)}</div>
     <div class="txt"><div class="a">${label}</div></div>
@@ -2204,5 +2923,24 @@ function honeycombSVG(filled,mini=false){
 }
 
 /* ============================ boot ============================ */
-ScreenSignIn();
+/* seed() above already gave `state` a synchronous, always-valid demo baseline
+   so every function that reads state.sessions/state.queue at parse time is
+   safe. If IndexedDB has real persisted sessions (or the app is truly
+   configured for a real backend), this async step swaps them in and the
+   demo seed is dropped — see js/session-repository.js demoSeedAllowed(). */
+/* Sessions persist across refresh/restart via this hydration step; signing
+   in (online or offline-PIN) is still required every fresh load — session
+   VALIDITY should be re-checked, not silently trusted, in a clinical app. */
+(async function boot(){
+  try{
+    if(window.OOXII_DB){
+      const result = await window.OOXII_BACKEND.boot();
+      if(!result.useDemoSeed){
+        state.sessions = result.hydratedSessions;
+        state.queue = result.hydratedQueue;
+      }
+    }
+  }catch(e){ console.error('[OOXii] boot hydration failed, continuing with local demo data', e); }
+  go(ScreenSignIn);
+})();
 </script>
