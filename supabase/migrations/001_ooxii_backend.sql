@@ -361,7 +361,7 @@ create policy devices_select_own on devices
   for select to authenticated
   using (user_id = auth.uid());
 
-drop policy if exists devices_upsert_own on devices;
+drop policy if exists devices_insert_own on devices;
 create policy devices_insert_own on devices
   for insert to authenticated
   with check (user_id = auth.uid() and ooxii_is_active_profile());
