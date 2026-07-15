@@ -2361,8 +2361,21 @@ function qrPayloadFor(s){
   return JSON.stringify({
     v:1, camp:'PVEC-VU', cid:s.id, sid:'uuid-'+s.id, fid: ctx?ctx.activeFestivalId:null,
     step:DE.getNextRequiredStep(s), status:s.status, ver:s.version, ts:Date.now(),
-    dev:state.device, tid:state.tester.testerId, mac:'sig:'+(s.version*7+s.id.length)
+    dev:state.device, tid:state.tester.testerId, mac:'sig:'+(s.version*7+s.id.length),
+    snap: qrSnapshotOf(s),
   });
+}
+/* The actual clinical state, carried IN the QR itself. Required for a
+   genuinely offline handover: two devices that have never synced (no
+   internet, ever) have no other way to share this client's data — the QR
+   IS the only channel. Still a routing/handover token, not the audit log:
+   this carries current field VALUES only, never session_events history. */
+function qrSnapshotOf(s){
+  return {
+    status:s.status, version:s.version, time:s.time, path:s.path, dir:s.dir,
+    intake:s.intake, distance:s.distance, near:s.near, wheel:s.wheel,
+    paddle:s.paddle, dispense:s.dispense, exit:s.exit,
+  };
 }
 function simulateScan(id){ closeScrim(); handleScannedPayload(qrPayloadFor(state.sessions[id])); }
 function simulateScanRaw(raw){ closeScrim(); handleScannedPayload(raw); }
@@ -2380,9 +2393,30 @@ function handleScannedPayload(raw){
     showQRError('This QR code is from a different festival. Nothing was opened.');
     return;
   }
-  const s=state.sessions[p.cid];
-  if(!s){ showQRError('Client '+p.cid+' is not on this device yet. Ask the previous station to show the QR again.'); return; }
-  openSessionForActiveStation(s);
+  const existing=state.sessions[p.cid];
+  if(!existing){
+    // This device has never seen this client — the normal case for a real
+    // offline handover between two devices with no server sync between
+    // them. Adopt the snapshot carried in the QR rather than erroring out.
+    if(!p.snap){ showQRError('Client '+p.cid+' is not on this device yet, and this QR code has no session data to import. Ask the previous station to show the QR again.'); return; }
+    const adopted=Object.assign({id:p.cid}, p.snap);
+    state.sessions[p.cid]=adopted;
+    if(!state.queue.includes(p.cid)) state.queue.unshift(p.cid);
+    if(window.OOXII_DB) window.OOXII_DB.sessions.put(adopted).catch(()=>{});
+    openSessionForActiveStation(adopted);
+    return;
+  }
+  // Already have a local copy — never let an older QR snapshot silently
+  // overwrite newer local data (same "local wins if newer" rule Search
+  // Client already uses for the online/offline merge).
+  if(p.snap && p.ver && p.ver > (existing.version||0)){
+    const merged=Object.assign({}, existing, p.snap, {id:p.cid});
+    state.sessions[p.cid]=merged;
+    if(window.OOXII_DB) window.OOXII_DB.sessions.put(merged).catch(()=>{});
+    openSessionForActiveStation(merged);
+    return;
+  }
+  openSessionForActiveStation(existing);
 }
 function showQRError(msg){
   scrim(`<div class="modal">
