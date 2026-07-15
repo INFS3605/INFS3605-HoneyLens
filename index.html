@@ -1215,9 +1215,12 @@ function promptOfflinePinSetup(){
   </div>`);
 }
 async function confirmOfflinePinSetup(){
-  const pin=$('#pin-set').value;
+  // NOT $('#pin-set') — $() is scoped to #screen, but scrim() modals mount
+  // into #phone (a sibling of #screen), so that lookup always returns null
+  // here. Use a plain document lookup for anything inside a scrim modal.
+  const pin=document.getElementById('pin-set').value;
   const r = await window.OOXII_AUTH.setOfflinePin(pin);
-  if(!r.ok){ const e=$('#pin-set-err'); e.style.display='block'; e.textContent=r.error; return; }
+  if(!r.ok){ const e=document.getElementById('pin-set-err'); e.style.display='block'; e.textContent=r.error; return; }
   closeScrim();
   toast('Offline access ready for 30 days');
   go(ScreenHome);
