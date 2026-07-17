@@ -13,7 +13,11 @@
 */
 'use strict';
 
-const CACHE_VERSION = 'v1';
+// Bumped for the QR transport schema v2 (compact/compressed payload,
+// js/vendor/fflate.min.js) — cache-first same-origin assets changed again,
+// so another version bump is what actually gets an already-installed
+// service worker to re-fetch them, rather than serving stale copies forever.
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
@@ -37,6 +41,7 @@ const CORE_ASSETS = [
   '/js/sw-register.js',
   '/js/vendor/qrcode.min.js',
   '/js/vendor/html5-qrcode.min.js',
+  '/js/vendor/fflate.min.js',
 ];
 
 // Optional — js/config.js is gitignored and legitimately absent in demo/

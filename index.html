@@ -20,6 +20,12 @@
 <!-- Real camera QR scanning (rear-camera preference, image-upload fallback) —
      vendored locally (js/vendor/html5-qrcode.min.js), same reasoning as above. -->
 <script src="js/vendor/html5-qrcode.min.js" onerror="console.error('[OOXii] js/vendor/html5-qrcode.min.js missing — camera/image QR scanning will be unavailable.')"></script>
+<!-- Deflate compression for the compact QR transport format (schema v2) —
+     a fully-populated Wheel+Paddle session's clinical payload is too dense
+     to reliably decode as a plain-JSON QR at a scannable size; the compact
+     schema + this compression is what makes it fit. Vendored (js/vendor/
+     fflate.min.js), never a CDN, so encoding/decoding works fully offline. -->
+<script src="js/vendor/fflate.min.js" onerror="console.error('[OOXii] js/vendor/fflate.min.js missing — QR generation for large sessions will fail loudly rather than producing an undecodable QR.')"></script>
 <!-- Supabase JS v2 (browser bundle) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <!-- Backend config + modules — see BACKEND_IMPLEMENTATION_PLAN.md.
@@ -283,8 +289,6 @@
   .modal p{color:var(--dim);font-size:14px;margin:6px 0 16px;line-height:1.5}
   .qrbox{background:#fff;border-radius:16px;padding:16px;display:inline-block;margin:6px auto 14px}
   .qrbox img,.qrbox canvas{display:block;border-radius:6px}
-  .qr-fallback{font-family:ui-monospace,Menlo,monospace;font-size:9px;color:#1b1d3a;background:#fff;
-    border-radius:12px;padding:14px;word-break:break-all;text-align:left;max-height:150px;overflow:auto}
   .modal .id-big{font-size:30px;font-weight:800;letter-spacing:2px;color:var(--teal-2);margin:2px 0 4px}
 
   /* blocking notice */
@@ -2360,46 +2364,183 @@ function triggerImageUpload(){
   };
   inp.click();
 }
-/* single source for the handover QR payload (structure unchanged; tid added — backward compatible) */
-/* QR is a routing token, not the clinical database — only what the next
-   station needs. `fid` (festival id) is a backward-compatible addition: old
-   payloads without it still validate, but a mismatched fid on a configured
-   backend is rejected as "wrong festival". */
-function qrPayloadFor(s){
-  const ctx = window.OOXII_BACKEND ? window.OOXII_BACKEND.getCachedContext() : null;
-  // sid is the real client_sessions.id (server UUID) — was a fake 'uuid-'+cid
-  // string before; ensureServerId() assigns and remembers a real one so the
-  // receiving device can eventually sync under the SAME server row instead of
-  // apply_session_event() creating a second, orphaned one.
-  const sid = window.OOXII_SESSIONS ? window.OOXII_SESSIONS.ensureServerId(s) : ('uuid-'+s.id);
-  // rdev is this device's real, stable UUID (newDeviceId()) — `dev` stays the
-  // cosmetic station-role label (e.g. "DIST-02") already shown in the UI.
-  const rdev = window.OOXII_SESSIONS ? window.OOXII_SESSIONS.newDeviceId() : null;
-  return JSON.stringify({
-    v:1, camp:'PVEC-VU', cid:s.id, sid, fid: ctx?ctx.activeFestivalId:null,
-    step:DE.getNextRequiredStep(s), station:getRequiredStation(s), status:s.status, ver:s.version, ts:Date.now(),
-    dev:state.device, rdev, tid:state.tester.testerId, mode:(state.mode||'festival'),
-    // latest local event id for this session, set only once recordBackendEvent's
-    // IndexedDB write + event queueing has actually resolved (see saveDistance
-    // etc., which now await it before generating this QR) — lets the receiving
-    // device recognise an exact re-scan of the same handover as a no-op.
-    eid: s._lastEventId||null,
-    mac:'sig:'+(s.version*7+s.id.length),
-    snap: qrSnapshotOf(s),
-  });
+/* ============================ QR transport schema v2 ============================
+   A fully-populated Wheel+Paddle session's clinical data, sent as plain JSON
+   (schema v1), produces a QR too dense to reliably decode at a screen-scannable
+   size — confirmed by direct testing (see BACKEND_TEST_PLAN.md). v2 fixes this
+   with THREE layers, applied in order: (1) an explicit allowlist that drops
+   every field that is derivable, duplicated, or never read on a receiving
+   device — see the field-by-field audit in BACKEND_IMPLEMENTATION_PLAN.md;
+   (2) short keys instead of full field names; (3) real deflate compression
+   (vendored js/vendor/fflate.min.js) over the compact JSON, base64url-encoded
+   with an `OOX2:` prefix. v1 (legacy plain-JSON) QR codes still decode
+   unchanged — decodeQrPayload() detects the format and normalises both into
+   the SAME shape the rest of handleScannedPayload() already validates against
+   (schema/festival/duplicate/stale-version checks are NOT duplicated here). */
+const QR_ENC_PREFIX = 'OOX2:';
+// Fixed enumerations already used elsewhere for these fields (AGE_BANDS,
+// VILLAGES, PADDLE_POWERS are declared once, above) — index-coded so the
+// wire payload carries a number instead of a repeated string. An unknown
+// value (e.g. a future config change) safely falls back to the raw string
+// rather than corrupting or dropping data.
+const GENDER_CODES=['Male','Female'];
+const SESSION_TYPE_CODES=['Individual','Group'];
+const CATARACT_CODES=['No','Yes, right eye','Yes, left eye','Yes, both eyes','Unsure'];
+function codeIndex(list,val){ const i=list.indexOf(val); return i>=0?i:val; }
+function codeValue(list,idx){ return (typeof idx==='number' && list[idx]!=null) ? list[idx] : idx; }
+
+/* Deterministic 32-bit FNV-1a hash, hex-encoded — a short, fast, synchronous
+   integrity checksum for the QR transport payload.
+   This detects ACCIDENTAL corruption and incomplete/truncated QR data (a
+   damaged print, a partial scan, a bit flipped in transit) — that is its
+   only job, and it does that job well enough without forcing every QR
+   encode/decode call in this file to become async for crypto.subtle.
+   It is NOT cryptographic protection: FNV-1a has no collision resistance
+   and no keying, so it cannot detect a deliberate, malicious modification
+   by someone who can compute the same hash. No code in this app should ever
+   treat a passing checksum as a claim of authenticity — only as "this QR
+   was not accidentally damaged." If a future requirement needs to defend
+   against deliberate tampering, that needs a real MAC/signature, not this. */
+function fnv1aHash(str){
+  let h=0x811c9dc5;
+  for(let i=0;i<str.length;i++){ h^=str.charCodeAt(i); h=Math.imul(h,0x01000193); }
+  return (h>>>0).toString(16).padStart(8,'0');
 }
-/* The actual clinical state, carried IN the QR itself. Required for a
-   genuinely offline handover: two devices that have never synced (no
-   internet, ever) have no other way to share this client's data — the QR
-   IS the only channel. Still a routing/handover token, not the audit log:
-   this carries current field VALUES only, never session_events history. */
-function qrSnapshotOf(s){
-  return {
-    status:s.status, version:s.version, time:s.time, path:s.path, dir:s.dir,
-    intake:s.intake, distance:s.distance, near:s.near, wheel:s.wheel,
-    paddle:s.paddle, dispense:s.dispense, exit:s.exit,
+function canonicalStringForChecksum(compact){
+  // Fixed field order, independent of object-key insertion order — computed
+  // identically at encode and decode time so the checksum is unambiguous.
+  return [compact.v, compact.c, compact.s||'', compact.f||'', compact.e||'', compact.n, JSON.stringify(compact.r)].join('|');
+}
+function b64urlEncode(bytes){
+  let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function b64urlDecode(str){
+  let s=str.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='=';
+  const bin=atob(s), bytes=new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
+  return bytes;
+}
+
+function compactEyeLine(e){ return e ? [e.lineReached, e.bonusLetters||0] : null; }
+function expandEyeLine(a){ return a ? {lineReached:a[0], bonusLetters:a[1]||0, logmar:calculateLogMAR(a[0],a[1]||0)} : null; }
+function compactWheelEye(e){
+  if(!e || !e.lensType) return null;
+  return [e.lensType, e.spherePower||null, e.addOnUsed?1:0, e.addOnPower||null,
+    e.toricUsed?1:0, e.toricPower||null, (e.toricAxis!=null?e.toricAxis:null),
+    e.colourTestResult||null, e.canReadLine9OrSmaller?1:0, e.visionImproved?1:0];
+}
+function expandWheelEye(a){
+  if(!a) return null;
+  const eye={ lensType:a[0], spherePower:a[1], addOnUsed:!!a[2], addOnPower:a[3],
+    toricUsed:!!a[4], toricPower:a[5], toricAxis:a[6],
+    colourTestResult:a[7], canReadLine9OrSmaller:!!a[8], visionImproved:!!a[9] };
+  eye.bestLens=bestLensLabel(eye);
+  return eye;
+}
+
+/* Builds the compact clinical-results envelope. Every excluded field was
+   checked against actual DE.isXComplete()/gating reads and actual renders —
+   see the audit table in BACKEND_IMPLEMENTATION_PLAN.md for the field-by-
+   field justification (derivable: logmar, bestLens, paddle suggestion/
+   override, paddle.ageBand; duplicated: version/status repeated inside the
+   old snap; administrative/never read on a receiving device: testerId,
+   deviceId, recordedAt/completedAt, path, dir, time; excluded per explicit
+   instruction: free-text notes). Nothing here removes a clinical RESULT. */
+function compactResultsFor(s){
+  const k=s.intake||{};
+  const r={
+    st: s.status==='Finalised'?1:0,
+    i: [codeIndex(AGE_BANDS,k.ageBand), codeIndex(GENDER_CODES,k.gender), codeIndex(VILLAGES,k.village), codeIndex(CATARACT_CODES,k.cataract), codeIndex(SESSION_TYPE_CODES,k.sessionType)],
   };
+  if(s.distance) r.d=[compactEyeLine(s.distance.rightUnaided), compactEyeLine(s.distance.leftUnaided), s.distance.hasGlasses?1:0, s.distance.hasGlasses?compactEyeLine(s.distance.ownGlasses):null];
+  if(s.near) r.nr=[compactEyeLine(s.near.unaided), s.near.hasReading?1:0, s.near.hasReading?compactEyeLine(s.near.ownGlasses):null];
+  if(s.wheel) r.w=[s.wheel.pd, compactWheelEye(s.wheel.right), compactWheelEye(s.wheel.left)];
+  if(s.paddle) r.p=[codeIndex(PADDLE_POWERS,s.paddle.clientPreference), codeIndex(PADDLE_POWERS,s.paddle.selectedPower)];
+  if(s.dispense) r.x=[s.dispense.glassesDispensed?1:0, s.dispense.frameSize||null, s.dispense.frameColour||null];
+  if(s.exit) r.ex=[s.exit.counsellingDone?1:0, s.exit.glassesDispensed?1:0];
+  return r;
 }
+/* Reverses compactResultsFor — reconstructs the SAME full session shape
+   every existing screen/DE function already expects, recomputing derivable
+   fields exactly the way the original save functions did (never inventing
+   new data). `path`/`dir`/`time` are UI-only and confirmed never read for
+   any decision or gating logic — rebuilt/defaulted here for consistency
+   with a normally-created session, not because anything depends on them. */
+function expandResults(cid, ver, r){
+  const ageBand=codeValue(AGE_BANDS,r.i[0]), gender=codeValue(GENDER_CODES,r.i[1]),
+    village=codeValue(VILLAGES,r.i[2]), cataract=codeValue(CATARACT_CODES,r.i[3]),
+    sessionType=codeValue(SESSION_TYPE_CODES,r.i[4]);
+  const s={
+    id:cid, version:ver, status: r.st?'Finalised':'In Progress', dir:'out', time:nowTime(),
+    intake:{ageBand,gender,village,cataract,sessionType,notes:''},
+    distance:null, near:null, wheel:null, paddle:null, dispense:null, exit:null,
+  };
+  if(r.d) s.distance={ rightUnaided:expandEyeLine(r.d[0]), leftUnaided:expandEyeLine(r.d[1]), hasGlasses:!!r.d[2], ownGlasses: r.d[3]?expandEyeLine(r.d[3]):null };
+  if(r.nr) s.near={ unaided:expandEyeLine(r.nr[0]), hasReading:!!r.nr[1], ownGlasses: r.nr[2]?expandEyeLine(r.nr[2]):null };
+  if(r.w) s.wheel={ pd:r.w[0], right:expandWheelEye(r.w[1]), left:expandWheelEye(r.w[2]) };
+  if(r.p){
+    const clientPreference=codeValue(PADDLE_POWERS,r.p[0])||null, selectedPower=codeValue(PADDLE_POWERS,r.p[1])||null;
+    const sug=suggestPaddlePower(ageBand);
+    s.paddle={ ageBand, suggestedPower:sug.power, suggestionNote:sug.note, clientPreference, selectedPower,
+      preferenceOverrodeSuggestion: !!clientPreference && clientPreference!==sug.power, notes:'' };
+  }
+  if(r.x) s.dispense={ glassesDispensed:!!r.x[0], frameSize:r.x[1]||null, frameColour:r.x[2]||null };
+  if(r.ex) s.exit={ counsellingDone:!!r.ex[0], glassesDispensed:!!r.ex[1] };
+  s.path=['Registration'];
+  if(s.distance) s.path.push('Distance');
+  if(s.near) s.path.push('Near');
+  if(s.wheel) s.path.push('Wheel');
+  if(s.paddle) s.path.push('Paddle');
+  if(s.dispense) s.path.push('Dispense');
+  if(s.exit) s.path.push('Exit');
+  return s;
+}
+
+/* Builds a v2 QR string: compact allowlisted payload → checksum → deflate →
+   base64url → `OOX2:` prefix. Throws (visibly, per showHandoverQR's own
+   error handling) rather than silently emitting something the decoder can't
+   tell apart from a compressed payload if the compression library failed
+   to load — never ship a payload under the OOX2 prefix that isn't real. */
+function encodeQrPayload(s){
+  const ctx = window.OOXII_BACKEND ? window.OOXII_BACKEND.getCachedContext() : null;
+  // sid is the real client_sessions.id (server UUID) so a later sync can
+  // write to the SAME server row from either device.
+  const sid = window.OOXII_SESSIONS ? window.OOXII_SESSIONS.ensureServerId(s) : ('uuid-'+s.id);
+  const compact = { v:2, c:s.id, s:sid, f: ctx?ctx.activeFestivalId:null, e:s._lastEventId||null, n:s.version, r:compactResultsFor(s) };
+  const checksum = fnv1aHash(canonicalStringForChecksum(compact));
+  const withChecksum = Object.assign({}, compact, {k:checksum});
+  if(!window.fflate) throw new Error('Compression library (js/vendor/fflate.min.js) is not loaded');
+  const bytes = window.fflate.deflateSync(window.fflate.strToU8(JSON.stringify(withChecksum)));
+  return QR_ENC_PREFIX + b64urlEncode(bytes);
+}
+/* Detects v2 (compressed compact) vs v1 (legacy plain JSON) and normalises
+   BOTH into the same {cid,sid,fid,eid,ver,snap} shape handleScannedPayload
+   already validates — schema/festival/duplicate/stale-version checks are
+   NOT duplicated here. Returns {error:'checksum'|'corrupt'|'unrecognised'|
+   'no_compression_lib'} on any failure; nothing is imported on an error. */
+function decodeQrPayload(raw){
+  if(typeof raw!=='string' || !raw) return {error:'unrecognised'};
+  if(raw.startsWith(QR_ENC_PREFIX)){
+    if(!window.fflate) return {error:'no_compression_lib'};
+    let compact;
+    try{
+      const bytes=b64urlDecode(raw.slice(QR_ENC_PREFIX.length));
+      compact=JSON.parse(window.fflate.strFromU8(window.fflate.inflateSync(bytes)));
+    }catch(e){ return {error:'corrupt'}; }
+    if(!compact || compact.v!==2 || !compact.c || !compact.k || !compact.r) return {error:'corrupt'};
+    if(fnv1aHash(canonicalStringForChecksum(compact))!==compact.k) return {error:'checksum'};
+    let expanded;
+    try{ expanded=expandResults(compact.c, compact.n, compact.r); }catch(e){ return {error:'corrupt'}; }
+    return { cid:compact.c, sid:compact.s||null, fid:compact.f||null, eid:compact.e||null, ver:compact.n, snap:expanded };
+  }
+  let p=null;
+  try{ p=JSON.parse(raw); }catch(e){ return {error:'unrecognised'}; }
+  if(!p || p.v!==1 || !p.cid) return {error:'unrecognised'};
+  return { cid:p.cid, sid:p.sid||null, fid:p.fid||null, eid:p.eid||null, ver:p.ver, snap:p.snap };
+}
+/* single source for the handover QR payload */
+function qrPayloadFor(s){ return encodeQrPayload(s); }
 function simulateScan(id){ closeScrim(); handleScannedPayload(qrPayloadFor(state.sessions[id])); }
 function simulateScanRaw(raw){ closeScrim(); handleScannedPayload(raw); }
 /* every scan — camera, image upload, or the demo picker — passes through
@@ -2408,9 +2549,16 @@ function simulateScanRaw(raw){ closeScrim(); handleScannedPayload(raw); }
    needs to check the imported_events dedup store before deciding whether
    this scan is new work or a harmless re-scan of a handover already applied. */
 async function handleScannedPayload(raw){
-  let p=null;
-  try{ p=JSON.parse(raw); }catch(e){ /* not JSON — treated as damaged below */ }
-  if(!p || p.v!==1 || !p.cid || !acceptableId(p.cid)){
+  const p=decodeQrPayload(raw);
+  if(p.error==='checksum'){
+    // Corrupted/truncated compressed payload — distinct from "not an OOXii
+    // code" below, since the format WAS recognised, just damaged. Never
+    // partially import: decodeQrPayload validates the checksum before
+    // returning anything, so nothing has touched state or IndexedDB yet.
+    showQRError('QR data is incomplete or damaged. Please generate a new QR.');
+    return;
+  }
+  if(p.error || !p.cid || !acceptableId(p.cid)){
     showQRError('That QR code is damaged or is not an OOXii client code. Nothing was opened.');
     return;
   }
@@ -2452,6 +2600,7 @@ async function handleScannedPayload(raw){
     // them. Adopt the snapshot carried in the QR rather than erroring out.
     if(!p.snap){ showQRError('Client '+p.cid+' is not on this device yet, and this QR code has no session data to import. Ask the previous station to show the QR again.'); return; }
     opened=Object.assign({id:p.cid}, p.snap);
+    if(p.sid) opened._serverId=p.sid;
     isNewImport=true;
   } else if(p.snap && p.ver && p.ver > (existing.version||0)){
     // Already have a local copy, and the QR carries genuinely newer data —
@@ -2459,6 +2608,7 @@ async function handleScannedPayload(raw){
     // local data (same "local wins if newer" rule Search Client already
     // uses for the online/offline merge).
     opened=Object.assign({}, existing, p.snap, {id:p.cid});
+    if(p.sid) opened._serverId=p.sid;
     isNewImport=true;
   } else {
     opened=existing;
@@ -2630,7 +2780,10 @@ async function showHandoverQR(id, after){
     showQRGenerationError('This device could not build the handover QR for this client. Try again.');
     return;
   }
-  scrim(`<div class="modal">
+  // max-width bumped for this specific modal (not the shared .modal class)
+  // so the 280px QR + its .qrbox padding fits without cropping — see
+  // js/qr-service.js's QR_SIZE_PX.
+  scrim(`<div class="modal" style="max-width:380px">
     <h3>Handover QR</h3>
     <div class="id-big">${s.id}</div>
     <p>Next step: <b style="color:#fff">${stepLabel(DE.getNextRequiredStep(s))}</b><br>Scan on the next station's device to continue.</p>
@@ -2639,12 +2792,23 @@ async function showHandoverQR(id, after){
     <button class="btn btn-primary" onclick="closeScrim();${after?'__qrAfter()':''}">Done</button>
   </div>`);
   const target=document.getElementById('qr-target');
+  // renderQrInto never renders the raw JSON payload itself (that was the
+  // reported production bug — a white box showing the JSON as text instead
+  // of a scannable QR, caused by this vendored qrcodejs build throwing once
+  // a fully-populated payload exceeded its capacity at the default
+  // error-correction level). Any failure here — missing library, or a
+  // genuine generation error — shows the same clear, non-technical message;
+  // the real error is only ever logged to the console, never shown or
+  // encoded into the visible UI.
+  let ok=false;
   try{
-    if(window.OOXII_QR) window.OOXII_QR.renderQrInto(target, payload);
-    else target.innerHTML=`<div class="qr-fallback">${payload}</div>`;
+    ok = window.OOXII_QR ? window.OOXII_QR.renderQrInto(target, payload) : false;
   }catch(e){
-    console.error('[OOXii] QR rendering failed — falling back to plain text', s.id, e);
-    target.innerHTML=`<div class="qr-fallback">${payload}</div>`;
+    console.error('[OOXii] QR rendering threw unexpectedly', s.id, e);
+    ok=false;
+  }
+  if(!ok){
+    showQRGenerationError('Unable to generate QR code. Please try again.');
   }
 }
 function showQRGenerationError(msg){
