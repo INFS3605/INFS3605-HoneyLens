@@ -853,7 +853,7 @@ function getActiveFestivalMembership(){
    demo mode has no real roster, so every station stays open, matching its
    existing "walkable without a backend" purpose. */
 function stationRestrictionActive(){
-  return !!(window.OOXII_CONFIG_VALID && !isDemoModeUrl() && window.OOXII_BACKEND && window.OOXII_BACKEND.getCachedContext());
+  return !!(window.OOXII_CONFIG_VALID && !isDemoModeSession() && window.OOXII_BACKEND && window.OOXII_BACKEND.getCachedContext());
 }
 /* null = unrestricted (demo/no backend); array = this tester's real allowed_stations
    for their active festival (possibly empty = no station assignment at all). */
@@ -1140,6 +1140,23 @@ function privacy(extra){
 /* Shown when js/config.js has not been created (see js/config.example.js).
    ?demo=1 bypasses this for a fully local, backend-free walkthrough. */
 function isDemoModeUrl(){ try{ return new URLSearchParams(location.search).get('demo')==='1'; }catch(e){ return false; } }
+/* Demo Mode is an EXPLICIT, session-scoped choice — it must never be
+   inferred from being offline, from Supabase having no active session, from
+   a profile-load failure, from stale demo clients already sitting in
+   IndexedDB, from auth taking a while, or from a transient Supabase error.
+   sessionStorage (not localStorage) is deliberate: it is cleared when the
+   browser tab/window closes, so an old demo identity is never silently
+   restored in a later, unrelated browsing session. `?demo=1` in the URL is
+   still honoured (quick local testing / a bookmarked link) but the
+   canonical signal from here on is this flag, set only by the explicit
+   "Continue in demo mode" button presses. */
+const DEMO_MODE_KEY='ooxii_demo_mode';
+function isDemoModeSession(){
+  try{ if(sessionStorage.getItem(DEMO_MODE_KEY)==='true') return true; }catch(e){}
+  return isDemoModeUrl();
+}
+function enterDemoModeSession(){ try{ sessionStorage.setItem(DEMO_MODE_KEY,'true'); }catch(e){} }
+function exitDemoModeSession(){ try{ sessionStorage.removeItem(DEMO_MODE_KEY); }catch(e){} }
 function ScreenConfigError(){
   screenEl().innerHTML=`<div class="pad">
     ${header()}
@@ -1153,17 +1170,47 @@ function ScreenConfigError(){
       <div class="s">Copy <b>js/config.example.js</b> to <b>js/config.js</b> and fill in your Supabase project URL and publishable key — see SUPABASE_SETUP.md.</div></div>
     </div>
     <button class="btn btn-primary" onclick="location.reload()">${I('cloud',20)} Reload once configured</button>
-    <button class="btn btn-secondary" onclick="location.search='?demo=1'">Continue in demo mode (no backend)</button>
+    <button class="btn btn-secondary" onclick="enterDemoModeSession();location.reload()">Continue in demo mode (no backend)</button>
     <div class="hint">Demo mode runs entirely on this device with sample clients — nothing syncs anywhere.</div>
   </div>`;
 }
 
 /* ============================ SIGN IN ============================ */
-function ScreenSignIn(){
-  if(!window.OOXII_CONFIG_VALID && !isDemoModeUrl()){ go(ScreenConfigError); return; }
-  if(!window.OOXII_CONFIG_VALID){ return renderDemoSignIn(); }        // ?demo=1, no backend at all
-  if(!navigator.onLine){ return renderOfflineUnlock(); }              // no connection right now
+/* Startup decision sequence (see BACKEND_IMPLEMENTATION_PLAN.md "Auth
+   bootstrap" for the full trace):
+     1. Demo Mode explicitly selected THIS session? -> demo sign-in form.
+        (Never inferred — only true after enterDemoModeSession() ran.)
+     2. No Supabase configured at all? -> Configuration Needed screen.
+     3. Online? -> ask Supabase directly whether a session already exists;
+        if so, restore the REAL tester and skip the login form; if not (or
+        the check fails for any reason), show the real login form.
+     4. Offline? -> the offline-PIN-permit flow (a real signed-in tester
+        working offline), never demo. */
+async function ScreenSignIn(){
+  if(isDemoModeSession()){ return renderDemoSignIn(); }
+  if(!window.OOXII_CONFIG_VALID){ go(ScreenConfigError); return; }
+  if(!navigator.onLine){ return renderOfflineUnlock(); }
+  screenEl().innerHTML = `<div class="pad">${header()}<div class="hint" style="margin-top:60px;text-align:center">Checking your session…</div></div>`;
+  if(await tryRestoreOnlineSession()) return;
   return renderOnlineSignIn();
+}
+/* A real Supabase session may already exist (the SDK persists its own JWT
+   across refreshes) — restore that tester rather than showing the login
+   form again. Every failure path here (no session, profile inactive/
+   missing, no festival assignment, a network hiccup) falls through to the
+   REAL login form, never to Demo Mode — a stale/expired/invalid session is
+   never silently treated as "fine, log in as someone else instead". */
+async function tryRestoreOnlineSession(){
+  try{
+    const { data, error } = await window.OOXII_SUPABASE.auth.getSession();
+    if(error || !data || !data.session || !data.session.user) return false;
+    const restored = await window.OOXII_AUTH.restoreSessionContext(data.session.user.id, data.session.user.email);
+    if(!restored.ok) return false;
+    applyAuthContext(restored.context);
+    window.OOXII_BACKEND.refreshCachedContext(restored.context);
+    go(ScreenHome);
+    return true;
+  }catch(e){ console.error('[OOXii] Could not check for an existing Supabase session', e); return false; }
 }
 function renderDemoSignIn(){
   screenEl().innerHTML = `<div class="pad">
@@ -1859,7 +1906,7 @@ function saveForSync(){
 /* Real sync status when a backend is configured (js/sync-service.js);
    falls back to the original simulated queue in demo mode. */
 function ScreenSync(){
-  if(!window.OOXII_CONFIG_VALID || isDemoModeUrl()) return ScreenSyncDemo();
+  if(!window.OOXII_CONFIG_VALID || isDemoModeSession()) return ScreenSyncDemo();
   screenEl().innerHTML=`<div class="pad pb">
     ${navBar('home')}
     <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync queue</h1><p>Checking pending records…</p></div></div>
@@ -3080,7 +3127,16 @@ function navBar(active='home'){
 /* Sign-out warns about unsynced records before wiping local clinical data —
    never silently discards work a tester hasn't synced yet. */
 async function doLogout(){
-  if(!window.OOXII_CONFIG_VALID || isDemoModeUrl()){ state.authed=false; go(ScreenSignIn); return; }
+  if(isDemoModeSession() || !window.OOXII_CONFIG_VALID){
+    // Demo-user logout: clear the demo flag and the demo tester context,
+    // return to the login/configuration choice screen. Deliberately does
+    // NOT wipe IndexedDB clinical data here (unchanged from before this fix
+    // — demo data is left alone, not auto-deleted) and does NOT immediately
+    // re-enter Demo Mode — ScreenSignIn only does that if the flag is set
+    // again, which it no longer is.
+    exitDemoModeSession();
+    state.authed=false; go(ScreenSignIn); return;
+  }
   const r = await window.OOXII_AUTH.signOut({force:false});
   if(r.needsConfirmation){
     scrim(`<div class="modal">
@@ -3092,6 +3148,10 @@ async function doLogout(){
     </div>`);
     return;
   }
+  // Real-user logout: OOXII_AUTH.signOut() already signed out of Supabase
+  // (when online) and cleared the offline permit + local context. Never
+  // switch into Demo Mode here — ScreenSignIn shows the real login screen
+  // (or Configuration Needed, if config somehow became invalid meanwhile).
   state.authed=false; go(ScreenSignIn);
 }
 async function forceLogout(){

@@ -13,11 +13,13 @@
 */
 'use strict';
 
-// Bumped for the QR transport schema v2 (compact/compressed payload,
-// js/vendor/fflate.min.js) — cache-first same-origin assets changed again,
-// so another version bump is what actually gets an already-installed
-// service worker to re-fetch them, rather than serving stale copies forever.
-const CACHE_VERSION = 'v3';
+// Bumped for the auth-bootstrap fix (js/auth-service.js, js/session-
+// repository.js) — both are cache-first same-origin assets, so another
+// version bump is what actually gets an already-installed service worker to
+// re-fetch them, rather than serving stale copies forever. Authentication
+// state itself is never cached by this service worker (see the fetch
+// handler below) — only the STATIC SCRIPT FILES implementing it are.
+const CACHE_VERSION = 'v4';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
@@ -54,7 +56,18 @@ self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE_NAME);
     try {
-      await cache.addAll(CORE_ASSETS);
+      // Fetch each core asset with cache:'reload' — bypasses the browser's
+      // ordinary HTTP cache (a layer entirely separate from this Cache
+      // Storage bucket). cache.addAll()'s default fetch mode does NOT do
+      // this, and can silently precache an already-stale ambient HTTP-cache
+      // response for a file whose content changed but whose URL didn't —
+      // confirmed happening during testing of this exact fix. A version
+      // bump must always get the real, current bytes.
+      await Promise.all(CORE_ASSETS.map(async (url) => {
+        const res = await fetch(url, { cache: 'reload' });
+        if (!res.ok) throw new Error('Failed to fetch ' + url + ': ' + res.status);
+        await cache.put(url, res);
+      }));
     } catch (err) {
       console.error('[OOXii SW] Install failed — a mandatory offline asset could not be cached. Offline reopening will NOT work until this succeeds.', err);
       throw err; // fail installation visibly — never activate a half-cached shell

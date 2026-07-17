@@ -102,10 +102,17 @@
 
   /** Demo seed clients (A47-K, B12-M, C09-T, ...) are for local exploration
    *  only — gated behind an explicit flag so they never appear in a real
-   *  festival. Enable with ?demo=1 in the URL, or automatically when no
-   *  backend is configured at all (so the static prototype still walks). */
+   *  festival. True when the tester explicitly chose Demo Mode this browser
+   *  session (sessionStorage('ooxii_demo_mode'), set only by index.html's
+   *  "Continue in demo mode" button — see isDemoModeSession() there), via
+   *  the legacy ?demo=1 URL param, or automatically when no backend is
+   *  configured at all (so the static prototype still walks). Reads
+   *  sessionStorage directly rather than calling index.html's helper — both
+   *  read the exact same key, and sessionStorage is a plain browser global,
+   *  not something that needs cross-file wiring. */
   function demoSeedAllowed() {
     try {
+      if (sessionStorage.getItem('ooxii_demo_mode') === 'true') return true;
       const params = new URLSearchParams(window.location.search);
       if (params.get('demo') === '1') return true;
     } catch (e) {}

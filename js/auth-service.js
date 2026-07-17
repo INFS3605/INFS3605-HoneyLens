@@ -76,19 +76,19 @@
     return { profile, memberships };
   }
 
-  async function signInOnline(email, password) {
-    if (!window.OOXII_CONFIG_VALID) return { ok: false, error: 'App is not configured yet — see SUPABASE_SETUP.md.' };
-    if (!navigator.onLine) return { ok: false, error: 'The first sign-in on this device must happen online.' };
-    const sb = window.OOXII_SUPABASE;
-    const { data, error } = await sb.auth.signInWithPassword({ email, password });
-    if (error || !data.user) return { ok: false, error: friendlyAuthError(error) };
-
-    const loaded = await loadProfileAndMemberships(data.user.id);
-    if (loaded.error) { await sb.auth.signOut(); return { ok: false, error: loaded.error }; }
-
+  /** Builds and persists the same `context` shape from a userId/email we
+   *  already know is currently valid (either a fresh password sign-in, or an
+   *  existing Supabase session found on boot) — the ONLY place that shape is
+   *  built, so a restored session and a fresh sign-in can never drift apart.
+   *  Every failure here (inactive/missing profile, no festival assignment,
+   *  a query error) is reported as a plain error — the caller decides what
+   *  to show; this function never itself falls back to any other identity. */
+  async function restoreSessionContext(userId, email) {
+    const loaded = await loadProfileAndMemberships(userId);
+    if (loaded.error) return { ok: false, error: loaded.error };
     const context = {
-      userId: data.user.id,
-      email: data.user.email,
+      userId,
+      email,
       displayName: loaded.profile.display_name,
       appRole: loaded.profile.app_role,
       festivals: loaded.memberships.map((m) => ({
@@ -102,7 +102,19 @@
       signedInAt: nowIso(),
     };
     await window.OOXII_DB.context.set(context);
-    return { ok: true, context, needsOfflinePin: true };
+    return { ok: true, context };
+  }
+
+  async function signInOnline(email, password) {
+    if (!window.OOXII_CONFIG_VALID) return { ok: false, error: 'App is not configured yet — see SUPABASE_SETUP.md.' };
+    if (!navigator.onLine) return { ok: false, error: 'The first sign-in on this device must happen online.' };
+    const sb = window.OOXII_SUPABASE;
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error || !data.user) return { ok: false, error: friendlyAuthError(error) };
+
+    const restored = await restoreSessionContext(data.user.id, data.user.email);
+    if (!restored.ok) { await sb.auth.signOut(); return { ok: false, error: restored.error }; }
+    return { ok: true, context: restored.context, needsOfflinePin: true };
   }
 
   async function setOfflinePin(pin) {
@@ -170,7 +182,7 @@
   }
 
   window.OOXII_AUTH = {
-    signInOnline, setOfflinePin, offlinePermitStatus, unlockOffline,
+    signInOnline, restoreSessionContext, setOfflinePin, offlinePermitStatus, unlockOffline,
     getCurrentContext, refreshOnlineSession, pendingUnsyncedCount, signOut,
   };
 })();
