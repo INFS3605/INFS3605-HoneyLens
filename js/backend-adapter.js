@@ -157,10 +157,16 @@
     Paddle: ['paddle', 'status'],
     Dispense: ['dispense', 'status'],
     Exit: ['exit', 'status'],
+    /* A QR import can be the very first event this session's canonical row
+       ever sees on the server (e.g. the registering device never reconnects)
+       — carry every field so the RPC can build a complete row from it, not
+       just whatever the receiving station happens to look at. */
+    QRImport: ['ageBand', 'gender', 'village', 'cataract', 'distance', 'near', 'wheel', 'paddle', 'dispense', 'exit', 'status'],
   };
   const EVENT_TYPE = {
     Registration: 'registration', Distance: 'step_saved', Near: 'step_saved',
     Wheel: 'step_saved', Paddle: 'step_saved', Dispense: 'dispense_completed', Exit: 'exit_completed',
+    QRImport: 'qr_imported',
   };
 
   /** Called by index.html right after a clinical save mutates state.sessions.

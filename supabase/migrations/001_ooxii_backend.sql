@@ -641,15 +641,20 @@ begin
     end if;
   end if;
 
-  -- 5. lock the canonical row (create it on the first event for this session)
+  -- 5. lock the canonical row (create it on the first event for this session,
+  --    for ANY event type — not just 'registration'). Offline QR handover
+  --    means a later station's device can genuinely be the first one to ever
+  --    reach the internet for a given client (the registering device may
+  --    never reconnect at all); requiring 'registration' specifically would
+  --    strand that session as SESSION_NOT_FOUND forever. Race-safe: if two
+  --    devices race to create the same row, the loser's insert is a no-op
+  --    and it simply re-selects the row the winner created.
   select * into v_session from client_sessions where id = p_session_id for update;
   if not found then
-    if p_event_type <> 'registration' then
-      raise exception 'SESSION_NOT_FOUND' using errcode = 'P0002';
-    end if;
     insert into client_sessions (id, client_id, festival_id, mode, status, created_by, last_modified_by, registered_at)
     values (p_session_id, p_client_id, p_festival_id, p_mode, 'Draft', auth.uid(), auth.uid(), now())
-    returning * into v_session;
+    on conflict (id) do nothing;
+    select * into v_session from client_sessions where id = p_session_id for update;
   end if;
 
   -- 6. finalised sessions cannot be casually modified — only an
