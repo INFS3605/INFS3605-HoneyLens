@@ -1,9 +1,12 @@
-# Netlify config for a single static HTML site (no build step needed)
+# Netlify config for a single static HTML site
+
 [build]
+  command = "node scripts/generate-config.mjs"
   publish = "."
 
 [[headers]]
   for = "/*"
+
   [headers.values]
     X-Frame-Options = "SAMEORIGIN"
     Referrer-Policy = "no-referrer"
