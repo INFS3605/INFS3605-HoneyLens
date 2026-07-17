@@ -8,8 +8,13 @@
   Stores:
     sessions          — canonical local session records (same shape the app
                          already renders from `state.sessions[id]`)
-    pending_events     — clinical/admin events not yet confirmed synced
-    synced_event_ids   — ids of events the server has confirmed (idempotency)
+    pending_events     — clinical/admin events not yet confirmed synced (this
+                         device's own outbox, going TO Supabase)
+    synced_event_ids   — ids of THIS device's own events the server has
+                         confirmed (idempotency for the outbox above)
+    imported_events    — ids of QR handovers RECEIVED from another device,
+                         already applied locally — a re-scan of the same QR
+                         is recognised here without re-processing anything
     device              — one row: this device's local identity
     context             — one row: signed-in user + festival + station context
     sync_meta           — one row: pending/failed/conflict counts, last sync time
@@ -20,8 +25,8 @@
   'use strict';
 
   const DB_NAME = 'ooxii_db';
-  const DB_VERSION = 1;
-  const STORES = ['sessions', 'pending_events', 'synced_event_ids', 'device', 'context', 'sync_meta', 'conflicts', 'offline_permit'];
+  const DB_VERSION = 2;
+  const STORES = ['sessions', 'pending_events', 'synced_event_ids', 'imported_events', 'device', 'context', 'sync_meta', 'conflicts', 'offline_permit'];
 
   let dbPromise = null;
 
@@ -94,8 +99,35 @@
     clear: () => remove(storeName, 'current'),
   });
 
+  /** Best-effort request that the browser NOT evict this origin's storage
+   *  under pressure (relevant because a whole festival's clinical data lives
+   *  only in IndexedDB until it syncs). Never blocks the app — the browser
+   *  may silently ignore this on some platforms (notably iOS Safari), and
+   *  that is an acceptable, expected outcome, not an error. Cache Storage
+   *  (the service worker's app-shell cache) and IndexedDB are separate
+   *  systems with separate lifecycles; this only concerns IndexedDB/
+   *  localStorage durability, never ties into the service worker's cache. */
+  async function requestPersistentStorage() {
+    try {
+      if (!(navigator.storage && navigator.storage.persist)) {
+        console.info('[OOXii] Persistent storage API not available in this browser — skipping (not fatal).');
+        return null;
+      }
+      const alreadyPersisted = navigator.storage.persisted ? await navigator.storage.persisted() : false;
+      const granted = alreadyPersisted || await navigator.storage.persist();
+      console.info('[OOXii] Persistent storage ' + (granted ? 'granted' : 'NOT granted (browser may evict local data under storage pressure)') + '.');
+      return granted;
+    } catch (e) {
+      console.info('[OOXii] Persistent storage request failed — continuing without it (not fatal).', e);
+      return null;
+    }
+  }
+  // Fire-and-forget at load: best-effort by definition, nothing downstream
+  // depends on this having resolved.
+  requestPersistentStorage();
+
   window.OOXII_DB = {
-    open, put, get, getAll, remove, clearStore,
+    open, put, get, getAll, remove, clearStore, requestPersistentStorage,
     sessions: {
       put: (s) => put('sessions', s),
       get: (id) => get('sessions', id),
@@ -112,6 +144,11 @@
       mark: (id) => put('synced_event_ids', { id, syncedAt: new Date().toISOString() }),
       has: (id) => get('synced_event_ids', id).then((r) => !!r),
     },
+    importedEvents: {
+      mark: (id, meta) => put('imported_events', Object.assign({ id, importedAt: new Date().toISOString() }, meta || {})),
+      has: (id) => get('imported_events', id).then((r) => !!r),
+      get: (id) => get('imported_events', id),
+    },
     device: singleRow('device'),
     context: singleRow('context'),
     syncMeta: singleRow('sync_meta'),
@@ -125,7 +162,7 @@
      *  on sign-out after the user has been warned about unsynced records. */
     wipeClinicalData: () => Promise.all([
       clearStore('sessions'), clearStore('pending_events'), clearStore('synced_event_ids'),
-      clearStore('context'), clearStore('conflicts'), clearStore('sync_meta'),
+      clearStore('imported_events'), clearStore('context'), clearStore('conflicts'), clearStore('sync_meta'),
     ]),
   };
 })();

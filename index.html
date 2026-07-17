@@ -12,10 +12,14 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>OOXii — Offline Eye Camp</title>
-<!-- QR generation (unchanged from the original prototype) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-<!-- Real camera QR scanning (rear-camera preference, image-upload fallback) -->
-<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<!-- QR generation — vendored locally (js/vendor/qrcode.min.js) so QR codes can
+     still be GENERATED after the site's first load with no internet at all;
+     a station's whole reason to exist is working with zero connectivity, so
+     this cannot depend on a third-party CDN being reachable at scan time. -->
+<script src="js/vendor/qrcode.min.js" onerror="console.error('[OOXii] js/vendor/qrcode.min.js missing — QR display will fall back to text-only.')"></script>
+<!-- Real camera QR scanning (rear-camera preference, image-upload fallback) —
+     vendored locally (js/vendor/html5-qrcode.min.js), same reasoning as above. -->
+<script src="js/vendor/html5-qrcode.min.js" onerror="console.error('[OOXii] js/vendor/html5-qrcode.min.js missing — camera/image QR scanning will be unavailable.')"></script>
 <!-- Supabase JS v2 (browser bundle) -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <!-- Backend config + modules — see BACKEND_IMPLEMENTATION_PLAN.md.
@@ -29,6 +33,11 @@
 <script src="js/sync-service.js"></script>
 <script src="js/qr-service.js"></script>
 <script src="js/backend-adapter.js"></script>
+<!-- Offline app-shell service worker registration (sw.js at the repo root) —
+     lets the app reopen and perform QR handovers with no internet after its
+     first successful online load. Safe no-op on file:// or unsupported
+     browsers; the app already works without it. -->
+<script src="js/sw-register.js"></script>
 <style>
   :root{
     --bg-0:#15183c; --bg-1:#1e2157; --bg-2:#262a66;
@@ -1457,7 +1466,7 @@ function ScreenIntake(){
   <div class="btn-row"><button class="btn btn-primary" onclick="saveIntake()">Start test ${I('arrowR',22)}</button></div>`;
   wireSeg('in-gender'); wireSeg('in-type');
 }
-function saveIntake(){
+async function saveIntake(){
   const s=state.sessions[state.activeId];
   const notes=$('#in-notes').value;
   if(/\b\d{6,}\b|@|\+?\d[\d\s-]{7,}/.test(notes)){
@@ -1470,7 +1479,7 @@ function saveIntake(){
   if(!s.intake.ageBand||!s.intake.gender||!s.intake.village||!s.intake.cataract){ toast('Complete all required fields','warn'); return; }
   s.status='In Progress'; s.path=['Registration','Distance']; s.dir='out'; s.time=nowTime(); s.version++;
   if(!state.queue.includes(s.id)) state.queue.unshift(s.id);
-  recordBackendEvent('Registration', s, 'Registration');
+  await recordBackendEvent('Registration', s, 'Registration');
   finishStationTask(s,'Registration complete');
 }
 /* Fire-and-forget local-first persistence + sync queue hook (see
@@ -1479,10 +1488,10 @@ function saveIntake(){
    and never awaited, so the clinical UI is never blocked on IndexedDB or
    the network. */
 function recordBackendEvent(step, s, station){
-  if(window.OOXII_BACKEND){
-    window.OOXII_BACKEND.recordEvent(step, s, station || getActiveTesterStation())
-      .catch((e)=>console.error('[OOXii] recordEvent failed', step, e));
-  }
+  if(!window.OOXII_BACKEND) return Promise.resolve(null);
+  return window.OOXII_BACKEND.recordEvent(step, s, station || getActiveTesterStation())
+    .then((event)=>{ if(event) s._lastEventId=event.id; return event; })
+    .catch((e)=>{ console.error('[OOXii] recordEvent failed', step, e); return null; });
 }
 
 /* ============================ DISTANCE PRE-TEST ============================ */
@@ -1530,7 +1539,7 @@ function renderOwnGlasses(v){
   const f=()=>{$('#d-owout').textContent=acuityLabel(lineVal('d-owline'),+$('#d-owlet').value||0);};
   $('#d-owline').addEventListener('change',f); $('#d-owlet').addEventListener('change',f);
 }
-function saveDistance(){
+async function saveDistance(){
   const s=state.sessions[state.activeId]; if(!canCompleteStep(s,'Distance')){ backToBase(); return; }
   const g=segVal('d-glass');
   const right=chartResult(lineVal('d-rline'), +$('#d-rlet').value||0);
@@ -1545,7 +1554,7 @@ function saveDistance(){
      replace the unaided pre-test result (no authoritative rule says it may) */
   s.distance={ rightUnaided:right, leftUnaided:left, hasGlasses:g==='Yes', ownGlasses:own,
     testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime() };
-  s.version++; s._stepLabel='Distance test done'; recordBackendEvent('Distance', s, 'Distance'); advance(s);
+  s.version++; s._stepLabel='Distance test done'; await recordBackendEvent('Distance', s, 'Distance'); advance(s);
 }
 
 /* ============================ NEAR PRE-TEST ============================ */
@@ -1587,7 +1596,7 @@ function renderOwnReading(v){
   const f=()=>{$('#n-owout').textContent=acuityLabel(lineVal('n-owline'),+$('#n-owlet').value||0);};
   $('#n-owline').addEventListener('change',f); $('#n-owlet').addEventListener('change',f);
 }
-function saveNear(){
+async function saveNear(){
   const s=state.sessions[state.activeId]; if(!canCompleteStep(s,'Near')){ backToBase(); return; }
   const g=segVal('n-glass');
   const unaided=chartResult(lineVal('n-line'), +$('#n-let').value||0);
@@ -1599,7 +1608,7 @@ function saveNear(){
   }
   s.near={unaided, hasReading:g==='Yes', ownGlasses:own,
     testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime()};
-  s.version++; s._stepLabel='Near test done'; recordBackendEvent('Near', s, 'Distance'); advance(s);
+  s.version++; s._stepLabel='Near test done'; await recordBackendEvent('Near', s, 'Distance'); advance(s);
 }
 
 /* ============================ WHEEL (per eye) ============================ */
@@ -1681,7 +1690,7 @@ function readEyeForm(p){
   eye.bestLens=bestLensLabel(eye);
   return {eye};
 }
-function saveWheel(){
+async function saveWheel(){
   const s=state.sessions[state.activeId]; if(!canCompleteStep(s,'Wheel')){ backToBase(); return; }
   const pd=+$('#w-pd').value;
   if(!(pd>=52&&pd<=78)){ toast('PD must be between 52 and 78','warn'); return; }
@@ -1689,7 +1698,7 @@ function saveWheel(){
   if(r.error){ toast('Right eye: '+r.error,'warn'); return; }
   if(l.error){ toast('Left eye: '+l.error,'warn'); return; }
   s.wheel={ pd, right:r.eye, left:l.eye, testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime() };
-  s.version++; s._stepLabel='Wheel test done'; recordBackendEvent('Wheel', s, 'Wheel'); advance(s);
+  s.version++; s._stepLabel='Wheel test done'; await recordBackendEvent('Wheel', s, 'Wheel'); advance(s);
 }
 
 /* ============================ PADDLE — preferred reading power ============================ */
@@ -1732,7 +1741,7 @@ function ScreenPaddle(){
   </div>
   <div class="btn-row"><button class="btn btn-primary" onclick="savePaddle()">Save — Dispensing checked next ${I('arrowR',22)}</button></div>`;
 }
-function savePaddle(){
+async function savePaddle(){
   const s=state.sessions[state.activeId]; if(!canCompleteStep(s,'Paddle')){ backToBase(); return; }
   const selectedPower=$('#p-power').value, clientPreference=$('#p-pref').value||null;
   if(!selectedPower){ toast('Confirm the final selected reading power','warn'); return; }
@@ -1744,7 +1753,7 @@ function savePaddle(){
     notes:$('#p-notes').value,
     testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime()
   };
-  s.version++; s._stepLabel='Paddle test done'; recordBackendEvent('Paddle', s, 'Paddle'); advance(s);
+  s.version++; s._stepLabel='Paddle test done'; await recordBackendEvent('Paddle', s, 'Paddle'); advance(s);
 }
 
 /* ============================ DISPENSE ============================ */
@@ -1815,7 +1824,7 @@ function ScreenDispense(){
     ${privacy('Only anonymous ID '+s.id+'. No inventory is checked automatically.')}
   </div>`;
 }
-function confirmGlasses(){
+async function confirmGlasses(){
   const s=state.sessions[state.activeId]; if(!DE.canDispense(s)) return;
   s.dispense={
     glassesDispensed:true,
@@ -1824,7 +1833,7 @@ function confirmGlasses(){
     testerId:state.tester.testerId, deviceId:state.device, completedAt:nowTime()
   };
   s.status='Finalised'; s.version++;
-  recordBackendEvent('Dispense', s, 'Dispense');
+  await recordBackendEvent('Dispense', s, 'Dispense');
   // honey rewards completing the dispensing station's workflow task,
   // not the clinical outcome — the drop is earned whether or not glasses suit
   const r=awardHoney();
@@ -2262,11 +2271,11 @@ function ScreenExit(){
     <button class="btn btn-primary" ${exitDone?'disabled':''} onclick="confirmExit()">${I('check',22)} ${exitDone?'Exit complete':'Confirm counselling done'}</button>
   </div>`;
 }
-function confirmExit(){
+async function confirmExit(){
   const s=state.sessions[state.activeId]; if(!s || computeRoute(s)!=='none' || !DE.isNearComplete(s)) return;
   s.exit={counsellingDone:true, glassesDispensed:false, testerId:state.tester.testerId, deviceId:state.device, completedAt:nowTime()};
   s.status='Finalised'; s.version++;
-  recordBackendEvent('Exit', s, 'Exit');
+  await recordBackendEvent('Exit', s, 'Exit');
   const r=awardHoney(); // honey: admin/workflow task completion — not outcome-linked
   honeyAfterSave(r,'Exit & counselling complete',()=>go(baseScreen()));
 }
@@ -2358,10 +2367,24 @@ function triggerImageUpload(){
    backend is rejected as "wrong festival". */
 function qrPayloadFor(s){
   const ctx = window.OOXII_BACKEND ? window.OOXII_BACKEND.getCachedContext() : null;
+  // sid is the real client_sessions.id (server UUID) — was a fake 'uuid-'+cid
+  // string before; ensureServerId() assigns and remembers a real one so the
+  // receiving device can eventually sync under the SAME server row instead of
+  // apply_session_event() creating a second, orphaned one.
+  const sid = window.OOXII_SESSIONS ? window.OOXII_SESSIONS.ensureServerId(s) : ('uuid-'+s.id);
+  // rdev is this device's real, stable UUID (newDeviceId()) — `dev` stays the
+  // cosmetic station-role label (e.g. "DIST-02") already shown in the UI.
+  const rdev = window.OOXII_SESSIONS ? window.OOXII_SESSIONS.newDeviceId() : null;
   return JSON.stringify({
-    v:1, camp:'PVEC-VU', cid:s.id, sid:'uuid-'+s.id, fid: ctx?ctx.activeFestivalId:null,
-    step:DE.getNextRequiredStep(s), status:s.status, ver:s.version, ts:Date.now(),
-    dev:state.device, tid:state.tester.testerId, mac:'sig:'+(s.version*7+s.id.length),
+    v:1, camp:'PVEC-VU', cid:s.id, sid, fid: ctx?ctx.activeFestivalId:null,
+    step:DE.getNextRequiredStep(s), station:getRequiredStation(s), status:s.status, ver:s.version, ts:Date.now(),
+    dev:state.device, rdev, tid:state.tester.testerId, mode:(state.mode||'festival'),
+    // latest local event id for this session, set only once recordBackendEvent's
+    // IndexedDB write + event queueing has actually resolved (see saveDistance
+    // etc., which now await it before generating this QR) — lets the receiving
+    // device recognise an exact re-scan of the same handover as a no-op.
+    eid: s._lastEventId||null,
+    mac:'sig:'+(s.version*7+s.id.length),
     snap: qrSnapshotOf(s),
   });
 }
@@ -2380,8 +2403,11 @@ function qrSnapshotOf(s){
 function simulateScan(id){ closeScrim(); handleScannedPayload(qrPayloadFor(state.sessions[id])); }
 function simulateScanRaw(raw){ closeScrim(); handleScannedPayload(raw); }
 /* every scan — camera, image upload, or the demo picker — passes through
-   here: schema validation, then festival check, then the central station gate */
-function handleScannedPayload(raw){
+   here: schema validation, festival check, duplicate-import recognition,
+   then adopt/merge/preserve, then the central station gate. Async because it
+   needs to check the imported_events dedup store before deciding whether
+   this scan is new work or a harmless re-scan of a handover already applied. */
+async function handleScannedPayload(raw){
   let p=null;
   try{ p=JSON.parse(raw); }catch(e){ /* not JSON — treated as damaged below */ }
   if(!p || p.v!==1 || !p.cid || !acceptableId(p.cid)){
@@ -2393,30 +2419,121 @@ function handleScannedPayload(raw){
     showQRError('This QR code is from a different festival. Nothing was opened.');
     return;
   }
+  // Duplicate-import detection: the SAME handover (same event id, or same
+  // client+version when the sender has no event id yet) already applied to
+  // this device — e.g. the sender's QR screen scanned twice, or shown again
+  // after the receiver already imported it. Recognise it and just reopen the
+  // client; never re-merge or re-record it a second time.
+  const importKey = p.eid || (p.cid+':'+(p.ver||0));
+  if(window.OOXII_DB){
+    let already;
+    try{
+      already = await window.OOXII_DB.importedEvents.has(importKey);
+    }catch(e){
+      // Cannot safely tell whether this was already imported — do NOT
+      // silently assume "not a duplicate" and risk re-processing a handover
+      // that already completed. Fail visibly instead of guessing.
+      console.error('[OOXii] Could not check the import-dedup store', p.cid, e);
+      showQRError('The QR was read, but this device could not check whether it was already imported. Please try again.');
+      return;
+    }
+    if(already){
+      const existing=state.sessions[p.cid];
+      if(existing){ openSessionForActiveStation(existing); }
+      else { showQRError('This QR code was already imported on this device, but that client is no longer here. Ask the previous station to show a fresh QR.'); }
+      return;
+    }
+  }
   const existing=state.sessions[p.cid];
+  let opened=null, isNewImport=false;
   if(!existing){
     // This device has never seen this client — the normal case for a real
     // offline handover between two devices with no server sync between
     // them. Adopt the snapshot carried in the QR rather than erroring out.
     if(!p.snap){ showQRError('Client '+p.cid+' is not on this device yet, and this QR code has no session data to import. Ask the previous station to show the QR again.'); return; }
-    const adopted=Object.assign({id:p.cid}, p.snap);
-    state.sessions[p.cid]=adopted;
-    if(!state.queue.includes(p.cid)) state.queue.unshift(p.cid);
-    if(window.OOXII_DB) window.OOXII_DB.sessions.put(adopted).catch(()=>{});
-    openSessionForActiveStation(adopted);
+    opened=Object.assign({id:p.cid}, p.snap);
+    isNewImport=true;
+  } else if(p.snap && p.ver && p.ver > (existing.version||0)){
+    // Already have a local copy, and the QR carries genuinely newer data —
+    // merge it in. Never let an older QR snapshot silently overwrite newer
+    // local data (same "local wins if newer" rule Search Client already
+    // uses for the online/offline merge).
+    opened=Object.assign({}, existing, p.snap, {id:p.cid});
+    isNewImport=true;
+  } else {
+    opened=existing;
+    if(p.ver && existing && p.ver < (existing.version||0)){
+      toast('That QR code is older than what’s already on this device — kept the newer local data.','warn');
+    }
+  }
+
+  if(!isNewImport){
+    // Nothing new to persist — just reopen what's already here.
+    openSessionForActiveStation(opened);
     return;
   }
-  // Already have a local copy — never let an older QR snapshot silently
-  // overwrite newer local data (same "local wins if newer" rule Search
-  // Client already uses for the online/offline merge).
-  if(p.snap && p.ver && p.ver > (existing.version||0)){
-    const merged=Object.assign({}, existing, p.snap, {id:p.cid});
-    state.sessions[p.cid]=merged;
-    if(window.OOXII_DB) window.OOXII_DB.sessions.put(merged).catch(()=>{});
-    openSessionForActiveStation(merged);
+
+  if(!window.OOXII_DB){
+    showQRError('The QR was read, but this device could not save the client. Please free storage and try again.');
     return;
   }
-  openSessionForActiveStation(existing);
+
+  // Steps 4-5: persist the adopted/merged session, then CONFIRM the write
+  // actually landed (read it back) rather than trusting a non-throwing
+  // put() alone. A failure here must not touch state.sessions, must not
+  // mark the QR imported, and must not open the clinical workflow — the
+  // tester can simply rescan to retry from the top.
+  try{
+    await window.OOXII_DB.sessions.put(opened);
+    const verify = await window.OOXII_DB.sessions.get(opened.id);
+    if(!verify || verify.version!==opened.version) throw new Error('readback mismatch after sessions.put');
+  }catch(e){
+    console.error('[OOXii] Failed to persist imported session to IndexedDB', p.cid, e);
+    showQRError('The QR was read, but this device could not save the client. Please free storage and try again.');
+    return;
+  }
+
+  // Step 6: only now that the durable write is confirmed does the live UI
+  // adopt it.
+  state.sessions[p.cid]=opened;
+  if(!state.queue.includes(p.cid)) state.queue.unshift(p.cid);
+
+  // Steps 7-8: audit trail + canonical-row safety net — records that a
+  // handover landed on this device, with the full session snapshot, so a
+  // later sync can build the server row even if the ORIGINAL device never
+  // reconnects. Confirm the event actually reached the pending-events
+  // outbox (or was already synced) before treating this as done.
+  try{
+    if(!window.OOXII_BACKEND) throw new Error('backend adapter unavailable');
+    const event = await window.OOXII_BACKEND.recordEvent('QRImport', opened, getActiveTesterStation());
+    if(!event || !event.id) throw new Error('recordEvent returned no event');
+    const stored = await window.OOXII_DB.pendingEvents.get(event.id);
+    const alreadySynced = stored ? true : await window.OOXII_DB.syncedEventIds.has(event.id);
+    if(!stored && !alreadySynced) throw new Error('qr_imported event missing from pending_events after recordEvent');
+  }catch(e){
+    console.error('[OOXii] Failed to record the qr_imported audit event', p.cid, e);
+    // Session data IS already durably saved (steps 4-5 succeeded) — only the
+    // audit event failed. Do NOT mark the QR as imported and do NOT open the
+    // clinical workflow: a rescan of the same QR is still safe (worst case
+    // it just reopens the client without retrying the missing audit event).
+    showQRError('The QR was read, but this device could not save the client. Please free storage and try again.');
+    return;
+  }
+
+  // Step 9: only after BOTH prior writes are confirmed does this QR get
+  // marked imported — a failure above leaves the dedup store untouched, so
+  // a re-scan safely retries rather than silently skipping a handover that
+  // never actually completed.
+  try{
+    await window.OOXII_DB.importedEvents.mark(importKey, {cid:p.cid, ver:p.ver||null});
+  }catch(e){
+    console.error('[OOXii] Failed to record this QR as imported (dedup store)', p.cid, e);
+    showQRError('The QR was read and the client was saved, but this device could not record the handover. If you rescan, the client will just reopen — no data will be lost.');
+    return;
+  }
+
+  // Step 10: only now does the clinical workflow open.
+  openSessionForActiveStation(opened);
 }
 function showQRError(msg){
   scrim(`<div class="modal">
@@ -2429,9 +2546,90 @@ function showQRError(msg){
 }
 
 /* ============================ QR HANDOVER MODAL (real QR + fallback) ============================ */
-function showHandoverQR(id, after){
-  const s=state.sessions[id];
-  const payload=qrPayloadFor(s);
+/* IndexedDB is the source of truth for what gets encoded — never generate a
+   handover QR straight from in-memory state.sessions, which could in
+   principle be ahead of (or behind) what's actually durably saved. Async:
+   awaits the IndexedDB read before rendering anything. Not awaited by its
+   callers (finishStationTask's `showHandoverQR(s.id, cont)`), because this
+   function's real "completion" is the tester tapping Done/Close on the
+   modal it shows, not its own promise settling — there is nothing for a
+   caller to usefully await. */
+async function showHandoverQR(id, after){
+  window.__qrAfter = after||null;
+  if(!window.OOXII_DB){
+    showQRGenerationError('This device could not read its saved copy of this client (local storage unavailable). Nothing was generated.');
+    return;
+  }
+  let dbSession=null;
+  try{
+    dbSession = await window.OOXII_DB.sessions.get(id);
+  }catch(e){
+    console.error('[OOXii] Could not read the persisted session for QR generation', id, e);
+    showQRGenerationError('This device could not read its saved copy of this client. Try again, or check available storage.');
+    return;
+  }
+  if(!dbSession){
+    showQRGenerationError('No saved data was found for this client on this device. Nothing was generated.');
+    return;
+  }
+  const memSession = state.sessions[id];
+  const dbVer = dbSession.version||0, memVer = memSession ? (memSession.version||0) : 0;
+  if(memVer > dbVer){
+    // The in-memory copy is AHEAD of what's durably saved — the latest
+    // result has not actually finished persisting yet. Never generate a QR
+    // from data that isn't safely on disk.
+    showQRGenerationError('The latest result for this client has not finished saving to this device yet. Wait a moment and try again.');
+    return;
+  }
+  // IndexedDB is the source of truth: use it, and if the in-memory copy was
+  // stale (or missing), hydrate it from the persisted record rather than
+  // ever letting older in-memory state overwrite what's on disk.
+  const s = dbSession;
+  // `_lastEventId` is deliberately never written to IndexedDB (it's local
+  // sync-queue bookkeeping, not clinical data — see recordBackendEvent) so
+  // it only ever exists on the in-memory object. Carry it over rather than
+  // silently losing it when `s` is swapped to the IndexedDB-sourced record,
+  // otherwise the QR's `eid` field (and the pending-event check just below)
+  // would always look empty even right after a real save.
+  if(memSession && memSession._lastEventId && memSession.version===s.version) s._lastEventId=memSession._lastEventId;
+  if(memVer < dbVer || !memSession) state.sessions[id]=Object.assign({}, memSession, s);
+
+  // Pre-render validation — a failure here must not produce an incomplete QR.
+  const sid = window.OOXII_SESSIONS ? window.OOXII_SESSIONS.ensureServerId(s) : null;
+  let nextStation=null;
+  try{ nextStation = getRequiredStation(s); }catch(e){ nextStation=null; }
+  if(!s.id || !sid || typeof s.version!=='number' || s.version<1 || !nextStation){
+    console.error('[OOXii] Session failed pre-QR validation', {id:s.id, sid, version:s.version, nextStation});
+    showQRGenerationError('This client’s saved record is incomplete on this device. Nothing was generated — try re-saving the last step.');
+    return;
+  }
+  if(s._lastEventId){
+    try{
+      const [pendingRows, alreadySynced] = await Promise.all([
+        window.OOXII_DB.pendingEvents.all(),
+        window.OOXII_DB.syncedEventIds.has(s._lastEventId),
+      ]);
+      const hasPendingRecord = pendingRows.some(e=>e.id===s._lastEventId);
+      if(!hasPendingRecord && !alreadySynced){
+        showQRGenerationError('This client’s latest result was not recorded for sync on this device. Please re-save the last step before handing over.');
+        return;
+      }
+    }catch(e){
+      console.error('[OOXii] Could not verify the pending/synced event before QR generation', e);
+      showQRGenerationError('This device could not confirm the latest result was saved for sync. Try again.');
+      return;
+    }
+  }
+
+  let payload=null;
+  try{
+    payload=qrPayloadFor(s);
+    if(!payload) throw new Error('qrPayloadFor returned empty payload');
+  }catch(e){
+    console.error('[OOXii] Failed to build the QR payload', s.id, e);
+    showQRGenerationError('This device could not build the handover QR for this client. Try again.');
+    return;
+  }
   scrim(`<div class="modal">
     <h3>Handover QR</h3>
     <div class="id-big">${s.id}</div>
@@ -2440,10 +2638,22 @@ function showHandoverQR(id, after){
     <p style="font-size:12px;margin-top:0">No personal data — anonymous clinical workflow only.</p>
     <button class="btn btn-primary" onclick="closeScrim();${after?'__qrAfter()':''}">Done</button>
   </div>`);
-  window.__qrAfter = after||null;
   const target=document.getElementById('qr-target');
-  if(window.OOXII_QR) window.OOXII_QR.renderQrInto(target, payload);
-  else target.innerHTML=`<div class="qr-fallback">${payload}</div>`;
+  try{
+    if(window.OOXII_QR) window.OOXII_QR.renderQrInto(target, payload);
+    else target.innerHTML=`<div class="qr-fallback">${payload}</div>`;
+  }catch(e){
+    console.error('[OOXii] QR rendering failed — falling back to plain text', s.id, e);
+    target.innerHTML=`<div class="qr-fallback">${payload}</div>`;
+  }
+}
+function showQRGenerationError(msg){
+  scrim(`<div class="modal">
+    <div class="ic sq" style="background:rgba(240,106,122,.12);border:1px solid rgba(240,106,122,.4);width:60px;height:60px;margin:0 auto 12px">${I('warn',30,'#f06a7a')}</div>
+    <h3>Could not generate QR</h3>
+    <p>${msg}</p>
+    <button class="btn btn-secondary" onclick="closeScrim();${window.__qrAfter?'__qrAfter()':''}">Close</button>
+  </div>`);
 }
 
 /* ============================ blocking / info modals ============================ */
