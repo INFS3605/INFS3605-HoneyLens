@@ -21,6 +21,39 @@
 
   const MAX_BACKOFF_MS = 30000;
   let syncing = false;
+  // True once this device's `devices` row has been confirmed to exist this
+  // page load — avoids re-upserting on every syncNow() call (fired on
+  // every save via persistAndQueue's fire-and-forget, on 'online', and on
+  // boot). Never cached on failure, so a transient failure retries next time.
+  let deviceRegistered = false;
+
+  /** session_events.device_id references devices(id), but nothing else in
+   *  this codebase ever creates that row — js/session-repository.js's
+   *  newDeviceId() only ever generates/persists a LOCAL id (localStorage),
+   *  it never reaches the server. Confirmed as a real, previously-hidden
+   *  bug: every apply_session_event() call was masked by the version-
+   *  baseline bug returning before the session_events insert was ever
+   *  reached; fixing that surfaced this uncaught session_events_device_id_fkey
+   *  violation instead. devices is one of the few tables the client writes
+   *  to directly (not through apply_session_event()) — devices_insert_own/
+   *  devices_update_own RLS policies already existed in 001 for exactly
+   *  this, just never exercised until now. */
+  async function ensureDeviceRegistered(ctx) {
+    if (deviceRegistered) return { ok: true };
+    const sb = window.OOXII_SUPABASE;
+    const deviceId = window.OOXII_SESSIONS.newDeviceId();
+    const { error } = await sb.from('devices').upsert({
+      id: deviceId,
+      festival_id: ctx.activeFestivalId,
+      user_id: ctx.userId,
+      label: (navigator.userAgent || 'OOXii device').slice(0, 120),
+      app_version: 'ooxii-1.0',
+      last_seen_at: new Date().toISOString(),
+    }, { onConflict: 'id' });
+    console.info('[SYNC TRACE] ensureDeviceRegistered()', { deviceId, userId: ctx.userId, festivalId: ctx.activeFestivalId, ok: !error, error: error ? error.message : null });
+    if (!error) deviceRegistered = true;
+    return { ok: !error, error };
+  }
 
   function backoffDelay(attempts) {
     return Math.min(MAX_BACKOFF_MS, 1000 * Math.pow(2, attempts));
@@ -190,6 +223,21 @@
         await updateMeta({ blocked: true, blockedReason: sessionCheck.error });
         return { ok: false, reason: 'session_expired' };
       }
+
+      const ctx = await window.OOXII_AUTH.getCurrentContext();
+      if (!ctx) {
+        await updateMeta({ blocked: true, blockedReason: 'No signed-in context available for syncing. Try signing in again.' });
+        return { ok: false, reason: 'no_context' };
+      }
+      // Must happen before any apply_session_event() call — that RPC's
+      // session_events insert has a foreign key on device_id, and nothing
+      // else in this codebase ever creates the devices row it points to.
+      const deviceCheck = await ensureDeviceRegistered(ctx);
+      if (!deviceCheck.ok) {
+        await updateMeta({ blocked: true, blockedReason: 'Could not register this device for syncing: ' + ((deviceCheck.error && deviceCheck.error.message) || 'unknown error') });
+        return { ok: false, reason: 'device_registration_failed' };
+      }
+
       await updateMeta({ blocked: false, blockedReason: null });
 
       const all = await window.OOXII_DB.pendingEvents.all();
@@ -202,14 +250,23 @@
       for (const event of due) {
         if (blockedSessions.has(event.clientId)) continue; // preserve per-session order
         const result = await pushEvent(event);
-        if (result.synced) { pushed++; continue; }
-        if (result.conflicted) { conflicted++; blockedSessions.add(event.clientId); continue; }
+        if (result.synced) {
+          pushed++;
+          console.info('[SYNC TRACE] pending event disposition: REMOVED (synced)', { local_event_id: event.id, client_id: event.clientId });
+          continue;
+        }
+        if (result.conflicted) {
+          conflicted++; blockedSessions.add(event.clientId);
+          console.info('[SYNC TRACE] pending event disposition: REMOVED (moved to conflicts, never retried)', { local_event_id: event.id, client_id: event.clientId, conflict_status: result.status });
+          continue;
+        }
         // transient network failure — bounded backoff, keep in queue, stop
         // this run (a network blip usually affects every request, not one)
         event.attempts = (event.attempts || 0) + 1;
         event.lastError = String((result.error && result.error.message) || 'network error');
         event.nextRetryAt = new Date(Date.now() + backoffDelay(event.attempts)).toISOString();
         await window.OOXII_DB.pendingEvents.put(event);
+        console.info('[SYNC TRACE] pending event disposition: RETAINED (transient failure, will retry)', { local_event_id: event.id, client_id: event.clientId, attempts: event.attempts, nextRetryAt: event.nextRetryAt });
         break;
       }
 

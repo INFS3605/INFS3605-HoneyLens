@@ -185,7 +185,8 @@
    *  persisted and read back before anything is queued, and is passed
    *  through explicitly — persistAndQueue() no longer generates one itself. */
   async function recordEvent(step, session, station) {
-    console.info('[SYNC TRACE] recordEvent() entered', { step, clientId: session.id, station: station||null, versionAtEntry: session.version, serverIdAtEntry: session._serverId||null });
+    const authMode = (appState() && appState().authMode) || null;
+    console.info('[SYNC TRACE] recordEvent() entered', { step, clientId: session.id, station: station||null, versionAtEntry: session.version, serverIdAtEntry: session._serverId||null, authMode });
     try{
       const ctx = cachedContext || (cachedContext = await window.OOXII_AUTH.getCurrentContext());
       const festivalId = ctx ? ctx.activeFestivalId : null;
