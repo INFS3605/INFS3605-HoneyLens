@@ -171,11 +171,14 @@
     // server_version_before: for a conflict, data.session is the row exactly
     // as apply_session_event() read it (to_jsonb(v_session)) BEFORE any
     // update was attempted — i.e. the real server version at rejection time.
-    // For a success, data.version is the NEW version AFTER the update, so
-    // subtracting 1 gives what it was immediately before this event.
-    const serverVersionBefore = (data.status === 'ok' || data.status === 'duplicate_ok')
+    // For a success (including already_applied, which never increments the
+    // version — see migration 004), data.version is the CURRENT version, so
+    // subtracting 1 only makes sense for a genuine 'ok' (a real increment
+    // just happened); already_applied/duplicate_ok reuse data.session's
+    // as-is version for both before and after, since nothing changed.
+    const serverVersionBefore = data.status === 'ok'
       ? (data.version != null ? data.version - 1 : null)
-      : (data.session ? data.session.version : null);
+      : (data.session ? data.session.version : (data.version != null ? data.version : null));
     console.info('[SYNC TRACE] apply_session_event response', {
       session_id: event.sessionServerId,
       local_event_id: event.id,
@@ -189,7 +192,12 @@
       server_version_after: data.version != null ? data.version : (data.session ? data.session.version : null),
     });
 
-    if (data.status === 'ok' || data.status === 'duplicate_ok') {
+    // 'already_applied' (see migration 004_handle_identical_stale_events.sql):
+    // this event's supplied fields already exactly matched the canonical
+    // row — treated exactly like a real success, never as a conflict. The
+    // canonical session snapshot is still applied locally (harmless — it's
+    // already identical to what this event would have produced).
+    if (data.status === 'ok' || data.status === 'duplicate_ok' || data.status === 'already_applied') {
       await window.OOXII_DB.syncedEventIds.mark(event.id);
       await window.OOXII_DB.pendingEvents.remove(event.id);
       await applyServerSnapshot(event.clientId, data.session);
@@ -211,11 +219,49 @@
     return { conflicted: true, status: data.status };
   }
 
+  const SYNC_LOCK_NAME = 'ooxii-sync';
+
+  /** Cross-tab mutual exclusion for the whole sync sequence (device
+   *  registration through local pending-event removal) — see
+   *  BACKEND_IMPLEMENTATION_PLAN.md. Two same-origin tabs share one
+   *  IndexedDB; without this, both can independently read the same
+   *  pending_events snapshot and push the same event to
+   *  apply_session_event() within milliseconds of each other (confirmed
+   *  happening in production — a real conflict-table pair with the
+   *  identical local_event_id, 2ms apart). Web Locks is scoped per
+   *  browser context at the origin level, so `{ ifAvailable: true }`
+   *  correctly returns null to every OTHER tab (and to a second overlapping
+   *  call within the SAME tab) while one holder is still inside the lock —
+   *  no separate localStorage/spin-lock bookkeeping needed, and nothing
+   *  here can go stale: the lock is released automatically the instant the
+   *  callback settles (success OR throw), even if a tab crashes or is
+   *  killed mid-sync. */
   async function syncNow() {
-    if (syncing) return { ok: false, reason: 'already_syncing' };
     if (!window.OOXII_CONFIG_VALID) return { ok: false, reason: 'not_configured' };
     if (!navigator.onLine) return { ok: false, reason: 'offline' };
 
+    if (navigator.locks && navigator.locks.request) {
+      return navigator.locks.request(SYNC_LOCK_NAME, { ifAvailable: true }, (lock) => {
+        if (!lock) {
+          console.info('[SYNC TRACE] syncNow() could not acquire the cross-tab lock — another tab is already syncing');
+          return { ok: false, reason: 'already_running_elsewhere' };
+        }
+        return runSyncLoop();
+      });
+    }
+
+    // Web Locks unavailable (older browsers) — falls back to the original
+    // in-tab-only guard. This cannot stop a genuinely separate TAB from
+    // syncing concurrently, but still prevents this tab calling itself
+    // re-entrantly. Deliberately not a localStorage spin-lock (no expiry/
+    // recovery logic to get wrong) — just the same boolean this file
+    // already had before Web Locks existed.
+    if (syncing) return { ok: false, reason: 'already_syncing' };
+    console.info('[SYNC TRACE] syncNow() Web Locks API unavailable — using in-tab-only fallback guard');
+    return runSyncLoop();
+  }
+
+  async function runSyncLoop() {
     syncing = true;
     try {
       const sessionCheck = await window.OOXII_AUTH.refreshOnlineSession();

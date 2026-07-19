@@ -2070,6 +2070,7 @@ async function manualSyncNow(){
   const r=await window.OOXII_SYNC.syncNow();
   if(r.ok){ toast(r.pushed+' record'+(r.pushed===1?'':'s')+' synced'); }
   else if(r.reason==='session_expired'){ toast('Your session expired — sign in online again','warn'); }
+  else if(r.reason==='already_running_elsewhere'){ toast('Sync is already running in another OOXii tab.','warn'); }
   else { toast('Could not sync — will retry automatically','warn'); }
   go(ScreenSync);
 }
