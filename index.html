@@ -1004,6 +1004,13 @@ function loadHoney(){
 function saveHoney(){ try{ localStorage.setItem('hl_honey', JSON.stringify(state.honey)); }catch(e){} }
 const state = {
   authed:false, remember:true,
+  // Auth provenance — the ONLY thing that may ever classify a session as
+  // demo. Never inferred from state.tester.name (a real Supabase profile
+  // can legitimately be named "Ana Tupou" or "Demo Tester" — see
+  // assertNotAccidentalDemo()). One of: null (not yet signed in), 'real'
+  // (online Supabase sign-in), 'offline-real' (restored from the offline
+  // PIN permit), 'demo' (explicit "Continue in demo mode").
+  authMode:null,
   role: STATIONS.some(x=>x.key===SAVED_STATION) ? SAVED_STATION : null, // active tester station — change only via setActiveTesterStation()
   mode: SAVED_MODE==='individual' ? 'individual' : 'festival', // 'festival' (station-gated) or 'individual' (one tester, all steps) — change only via setTesterMode()
   device:'DISP-01',
@@ -1250,21 +1257,41 @@ async function ScreenSignIn(){
    never silently treated as "fine, log in as someone else instead". */
 async function tryRestoreOnlineSession(trace){
   trace = trace || {};
+  console.info('[AUTH TRACE] tryRestoreOnlineSession() entered');
   try{
     const { data, error } = await window.OOXII_SUPABASE.auth.getSession();
     trace.supabaseSessionExists = !!(!error && data && data.session && data.session.user);
+    const supabaseUserId = trace.supabaseSessionExists ? data.session.user.id : null;
+    console.info('[AUTH TRACE] tryRestoreOnlineSession() getSession() result', {
+      supabaseSessionExists: trace.supabaseSessionExists, supabaseUserId, getSessionError: error ? error.message : null,
+    });
     if(!trace.supabaseSessionExists) return false;
+    console.info('[AUTH TRACE] tryRestoreOnlineSession() calling restoreSessionContext()', { supabaseUserId, email: data.session.user.email });
     const restored = await window.OOXII_AUTH.restoreSessionContext(data.session.user.id, data.session.user.email);
     trace.profileLoaded = restored.ok;
     trace.membershipLoaded = restored.ok;
+    console.info('[AUTH TRACE] tryRestoreOnlineSession() restoreSessionContext() returned', {
+      supabaseUserId, ok: restored.ok, error: restored.ok ? null : restored.error,
+      displayName: restored.ok ? restored.context.displayName : null,
+    });
     if(!restored.ok) return false;
-    applyAuthContext(restored.context);
+    const testerBefore = Object.assign({}, state.tester);
+    applyAuthContext(restored.context, 'real');
+    const testerAfter = Object.assign({}, state.tester);
+    console.info('[AUTH TRACE] tryRestoreOnlineSession() applyAuthContext() applied', {
+      supabaseUserId,
+      testerBefore, testerAfter,
+      testerNameChanged: testerBefore.name !== testerAfter.name,
+      authMode: state.authMode,
+      sourceOfName: 'restored.context.displayName (from profiles.display_name) — no fallback name used here; demo status is never derived from this string',
+    });
     window.OOXII_BACKEND.refreshCachedContext(restored.context);
     trace.routingDecision = 'valid_supabase_session -> restored real tester -> ScreenHome';
     go(ScreenHome);
     return true;
   }catch(e){
     trace.error = e.message;
+    console.error('[AUTH TRACE] tryRestoreOnlineSession() threw', { message: e.message, stack: e.stack });
     console.error('[OOXii] Could not check for an existing Supabase session', e);
     return false;
   }
@@ -1289,7 +1316,7 @@ function doDemoSignIn(){
   const email=$('#si-email').value.trim(), pass=$('#si-pass').value;
   const err=$('#si-err');
   if(!email || !pass){ err.style.display='block'; err.textContent='Enter your email and password.'; return; }
-  state.authed=true; go(ScreenHome);
+  state.authed=true; state.authMode='demo'; go(ScreenHome);
 }
 
 function renderOnlineSignIn(){
@@ -1316,7 +1343,7 @@ async function doOnlineSignIn(){
   const r = await window.OOXII_AUTH.signInOnline(email, pass);
   btn.disabled=false; btn.textContent='Sign in';
   if(!r.ok){ err.style.display='block'; err.textContent=r.error; return; }
-  applyAuthContext(r.context);
+  applyAuthContext(r.context, 'real');
   window.OOXII_BACKEND.refreshCachedContext(r.context);
   promptOfflinePinSetup();
 }
@@ -1380,7 +1407,7 @@ async function doOfflineUnlock(){
   const pin=$('#si-pin').value, err=$('#si-err');
   const r = await window.OOXII_AUTH.unlockOffline(pin);
   if(!r.ok){ err.style.display='block'; err.textContent=r.error; return; }
-  applyAuthContext(r.context);
+  applyAuthContext(r.context, 'offline-real');
   window.OOXII_BACKEND.refreshCachedContext(r.context);
   toast('Signed in offline','cloud');
   go(ScreenHome);
@@ -1388,14 +1415,23 @@ async function doOfflineUnlock(){
 
 /** Map the backend auth context onto the existing `state.tester` shape the
     UI already renders everywhere — no screen needed to change for this. */
-function applyAuthContext(ctx){
+/** mode: 'real' (fresh or restored online Supabase sign-in) or
+ *  'offline-real' (restored from the encrypted offline PIN permit) — the
+ *  only two callers of this function, both real (non-demo) identities.
+ *  This is the ONLY place state.authMode is set to a non-demo value, and it
+ *  is set unconditionally here — never derived from ctx.displayName, which
+ *  is free-text a coordinator chose and carries no auth-provenance meaning. */
+function applyAuthContext(ctx, mode){
+  console.info('[AUTH TRACE] applyAuthContext() entered', { userId: ctx.userId, displayName: ctx.displayName, mode, testerNameBefore: state.tester.name });
   state.authed = true;
+  state.authMode = mode || 'real';
   state.tester.name = ctx.displayName;
   state.tester.email = ctx.email || state.tester.email;
   state.tester.testerId = ctx.userId ? ctx.userId.slice(0,8).toUpperCase() : state.tester.testerId;
   if(ctx.festivals && ctx.festivals[0]){
     state.tester.camp = ctx.festivals[0].festivalName;
   }
+  console.info('[AUTH TRACE] applyAuthContext() state.tester.name assigned directly from ctx.displayName; authMode set from explicit caller-provided mode, never from the name', { testerNameAfter: state.tester.name, authModeAfter: state.authMode });
 }
 /* ============================ HOME (tablet dashboard: sidebar + 3 nav cards) ============================ */
 function honeyDropIcon(w=18,h=24,id='dgS'){
@@ -1462,19 +1498,36 @@ function sidebar(){
     </div>
   </aside>`;
 }
-/* Production safeguard: a demo identity must never reach the home dashboard
-   without an explicit, THIS-session demo-mode selection. Checks both the
-   literal string a future refactor might use ("Demo Tester") and this
-   codebase's actual placeholder tester name ("Ana Tupou", state.tester's
-   default before any sign-in) — if this ever fires, something upstream
-   silently assigned a demo-like identity outside the one explicit path
-   (doDemoSignIn), which is exactly the bug class this exists to catch
-   instead of silently shipping it. */
+/* Production safeguard: a demo IDENTITY (state.authMode==='demo') must never
+   reach the home dashboard without an explicit, THIS-session demo-mode
+   selection (isDemoModeSession()). Deliberately NEVER inspects
+   state.tester.name — display names are free text a coordinator chooses in
+   the profiles table and carry no auth-provenance meaning; a real Supabase
+   profile can legitimately be named "Ana Tupou" or "Demo Tester" (that was
+   a real, reproduced bug here: a genuine signed-in tester named "Ana Tupou"
+   got misclassified as demo by a since-removed name check, was forced back
+   to sign-in, and immediately re-restored the same still-valid session —
+   an infinite loop). state.authMode is the only signal this reads, and it
+   is set exclusively by doDemoSignIn() ('demo') and applyAuthContext()
+   ('real'/'offline-real') — see their comments. If this ever fires,
+   something upstream set authMode='demo' outside the one explicit path
+   (doDemoSignIn), which is exactly the bug class this exists to catch. */
 function assertNotAccidentalDemo(){
-  const looksLikeDemo = state.tester && (state.tester.name==='Demo Tester' || state.tester.name==='Ana Tupou');
-  if(state.authed && looksLikeDemo && !isDemoModeSession()){
-    console.error('[OOXii] SAFETY: a demo-like tester identity reached Home without an explicit demo-mode selection this session.', {testerName:state.tester.name});
+  const explicitDemo = isDemoModeSession();
+  const demoContext = state.authMode === 'demo';
+  console.info('[AUTH TRACE] ScreenHome() -> assertNotAccidentalDemo() check', {
+    testerName: state.tester ? state.tester.name : null,
+    authed: state.authed,
+    authMode: state.authMode,
+    demoContext,
+    explicitDemo,
+    willRedirectToSignIn: !!(state.authed && demoContext && !explicitDemo),
+  });
+  if(state.authed && demoContext && !explicitDemo){
+    console.error('[OOXii] SAFETY: demo auth context (state.authMode==="demo") reached Home without an explicit demo-mode selection this session.', {authMode:state.authMode, testerName:state.tester.name});
     state.authed=false;
+    state.authMode=null;
+    exitDemoModeSession();
     go(ScreenSignIn);
     return false;
   }
@@ -3233,7 +3286,7 @@ async function doLogout(){
     // re-enter Demo Mode — ScreenSignIn only does that if the flag is set
     // again, which it no longer is.
     exitDemoModeSession();
-    state.authed=false; go(ScreenSignIn); return;
+    state.authed=false; state.authMode=null; go(ScreenSignIn); return;
   }
   const r = await window.OOXII_AUTH.signOut({force:false});
   if(r.needsConfirmation){
@@ -3250,12 +3303,12 @@ async function doLogout(){
   // (when online) and cleared the offline permit + local context. Never
   // switch into Demo Mode here — ScreenSignIn shows the real login screen
   // (or Configuration Needed, if config somehow became invalid meanwhile).
-  state.authed=false; go(ScreenSignIn);
+  state.authed=false; state.authMode=null; go(ScreenSignIn);
 }
 async function forceLogout(){
   closeScrim();
   await window.OOXII_AUTH.signOut({force:true});
-  state.authed=false; go(ScreenSignIn);
+  state.authed=false; state.authMode=null; go(ScreenSignIn);
 }
 
 /* ============================ PROFILE ============================ */
@@ -3501,6 +3554,7 @@ function honeycombSVG(filled,mini=false){
    in (online or offline-PIN) is still required every fresh load — session
    VALIDITY should be re-checked, not silently trusted, in a clinical app. */
 (async function boot(){
+  console.info('[AUTH TRACE] boot() entered', { testerNameAtParseTime: state.tester.name });
   try{
     if(window.OOXII_DB){
       const result = await window.OOXII_BACKEND.boot();
@@ -3530,6 +3584,7 @@ function honeycombSVG(filled,mini=false){
     }
     console.error('[OOXii] boot hydration failed, continuing with local demo data', e);
   }
+  console.info('[AUTH TRACE] boot() calling go(ScreenSignIn)', { testerNameBeforeSignIn: state.tester.name });
   go(ScreenSignIn);
 })();
 </script>

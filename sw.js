@@ -33,7 +33,14 @@
 // fixes, and the debug tracing added while diagnosing that. Same
 // cache-first fetch strategy and controlled (tester-consented) activation
 // as v5 — only the version string changed.
-const CACHE_VERSION = 'v6';
+//
+// v7: ships the auth false-positive fix — assertNotAccidentalDemo() (in
+// index.html) no longer infers Demo Mode from state.tester.name (a real
+// Supabase profile can legitimately be named "Ana Tupou"), only from the
+// explicit state.authMode/isDemoModeSession() signals — plus the [AUTH
+// TRACE] logging added while diagnosing it. Same controlled, tester-
+// consented activation as v5/v6 — only the version string changed.
+const CACHE_VERSION = 'v7';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
