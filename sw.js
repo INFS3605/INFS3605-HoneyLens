@@ -40,7 +40,18 @@
 // explicit state.authMode/isDemoModeSession() signals — plus the [AUTH
 // TRACE] logging added while diagnosing it. Same controlled, tester-
 // consented activation as v5/v6 — only the version string changed.
-const CACHE_VERSION = 'v7';
+//
+// v8: ships js/sync-service.js's device-registration fix (session_events.
+// device_id has a foreign key to devices(id) that nothing previously ever
+// satisfied) and js/backend-adapter.js's authMode trace field — both are
+// CORE_ASSETS, so without this bump a browser already on v7 would keep
+// running the pre-fix sync-service.js indefinitely (see the v6 note above
+// for why). Requires supabase/migrations/002_fix_session_event_version_
+// baseline.sql to also be applied to the project — that's a database
+// change, entirely separate from this cache version and not something
+// this file can do. Same controlled, tester-consented activation as
+// every version above — only the version string changed.
+const CACHE_VERSION = 'v8';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
