@@ -51,7 +51,18 @@
 // change, entirely separate from this cache version and not something
 // this file can do. Same controlled, tester-consented activation as
 // every version above — only the version string changed.
-const CACHE_VERSION = 'v8';
+//
+// v9: ships the version-baseline correction (client unaffected — server-
+// only, migrations 003/004) and js/sync-service.js's already_applied
+// handling + cross-tab Web Locks mutex, plus index.html's
+// already_running_elsewhere toast. Same reasoning as v8: both changed
+// files are CORE_ASSETS, so a browser already on v8 would otherwise keep
+// running the pre-fix sync-service.js indefinitely. Requires
+// supabase/migrations/003_correct_version_baseline_convention.sql and
+// 004_handle_identical_stale_events.sql to also be applied to the
+// project — a database change, separate from this cache version. Same
+// controlled, tester-consented activation as every version above.
+const CACHE_VERSION = 'v9';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
