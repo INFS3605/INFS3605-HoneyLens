@@ -57,40 +57,81 @@
   }
 
   /** Persist the current session snapshot and enqueue one sync event.
-   *  `meta`: { eventType, step, station, payloadKeys, baseVersion, festivalId, userId, mode } */
+   *  `meta`: { sessionServerId, eventType, step, station, payloadKeys, baseVersion, festivalId, userId, mode }
+   *
+   *  `meta.sessionServerId` is REQUIRED — the caller (recordEvent() in
+   *  js/backend-adapter.js) must already have called ensureServerId() on
+   *  the REAL session object and confirmed it persisted. This function
+   *  deliberately never generates or looks up a session ID itself anymore:
+   *  doing so on whatever `session` happened to be passed in (which used to
+   *  be a throwaway flattened copy, fresh on every call) produced a NEW
+   *  random UUID per save — a real, confirmed production bug where every
+   *  clinical save for the same client targeted a different canonical
+   *  client_sessions row on the server. Missing sessionServerId is a
+   *  programming error, not something to silently paper over — fail loudly. */
   async function persistAndQueue(session, meta) {
-    await window.OOXII_DB.sessions.put(session);
+    console.info('[SYNC TRACE] persistAndQueue() entered', {
+      client_id: session.id, sessionServerId: meta && meta.sessionServerId,
+      local_version: session.version, local_base_version: meta && meta.baseVersion,
+      event_type: meta && meta.eventType, step: meta && meta.step,
+    });
+    try{
+      if (!meta || !meta.sessionServerId) {
+        throw new Error('persistAndQueue: meta.sessionServerId is required — the caller must assign it via ensureServerId() on the real session object first');
+      }
+      await window.OOXII_DB.sessions.put(session);
 
-    const deviceId = newDeviceId();
-    const payload = {};
-    for (const key of meta.payloadKeys || []) payload[key] = session[key];
-    if (session.status) payload.status = session.status;
+      const deviceId = newDeviceId();
+      const payload = {};
+      for (const key of meta.payloadKeys || []) payload[key] = session[key];
+      if (session.status) payload.status = session.status;
 
-    const event = {
-      id: crypto.randomUUID(),
-      sessionServerId: ensureServerId(session),
-      clientId: session.id,
-      festivalId: meta.festivalId || null,
-      mode: meta.mode || 'festival',
-      eventType: meta.eventType,
-      step: meta.step || null,
-      station: meta.station || null,
-      payload,
-      deviceId,
-      userId: meta.userId || null,
-      baseVersion: meta.baseVersion,
-      clientTimestamp: new Date().toISOString(),
-      attempts: 0,
-      lastError: null,
-    };
-    await window.OOXII_DB.pendingEvents.put(event);
-    await bumpPendingCount();
+      const event = {
+        id: crypto.randomUUID(),
+        sessionServerId: meta.sessionServerId,
+        clientId: session.id,
+        festivalId: meta.festivalId || null,
+        mode: meta.mode || 'festival',
+        eventType: meta.eventType,
+        step: meta.step || null,
+        station: meta.station || null,
+        payload,
+        deviceId,
+        userId: meta.userId || null,
+        baseVersion: meta.baseVersion,
+        clientTimestamp: new Date().toISOString(),
+        attempts: 0,
+        lastError: null,
+      };
+      // TEMPORARY diagnostic trace for the version-mismatch investigation —
+      // logs the exact values as the event is created, before it ever
+      // reaches sync-service.js. No behaviour here has been changed.
+      console.info('[SYNC TRACE] event created', {
+        client_id: event.clientId,
+        session_id: event.sessionServerId,
+        local_event_id: event.id,
+        local_version: session.version,
+        local_base_version: event.baseVersion,
+        event_type: event.eventType,
+        payload: event.payload,
+        festival_id: event.festivalId,
+        user_id: event.userId,
+        device_id: event.deviceId,
+      });
+      await window.OOXII_DB.pendingEvents.put(event);
+      await bumpPendingCount();
 
-    // fire-and-forget: never block the UI on network or IndexedDB
-    if (navigator.onLine && window.OOXII_SYNC) {
-      window.OOXII_SYNC.syncNow().catch(() => {});
+      // fire-and-forget: never block the UI on network or IndexedDB
+      if (navigator.onLine && window.OOXII_SYNC) {
+        window.OOXII_SYNC.syncNow().catch((e) => {
+          console.error('[SYNC TRACE] persistAndQueue() fire-and-forget syncNow() threw', { client_id: event.clientId, local_event_id: event.id, message: e.message, stack: e.stack });
+        });
+      }
+      return event;
+    }catch(e){
+      console.error('[SYNC TRACE] persistAndQueue() threw', { client_id: session.id, message: e.message, stack: e.stack });
+      throw e;
     }
-    return event;
   }
 
   async function bumpPendingCount() {

@@ -81,7 +81,7 @@
 
   async function pushEvent(event) {
     const sb = window.OOXII_SUPABASE;
-    const { data, error } = await sb.rpc('apply_session_event', {
+    const rpcParams = {
       p_event_id: event.id,
       p_session_id: event.sessionServerId,
       p_festival_id: event.festivalId,
@@ -95,13 +95,66 @@
       p_base_version: event.baseVersion,
       p_client_timestamp: event.clientTimestamp,
       p_sync_batch_id: null,
+    };
+    // TEMPORARY diagnostic trace for the version-mismatch investigation —
+    // logs exactly what this device is about to send. No behaviour changed.
+    console.info('[SYNC TRACE] pushing to apply_session_event', {
+      session_id: event.sessionServerId,
+      local_event_id: event.id,
+      client_id: event.clientId,
+      local_base_version: event.baseVersion,
+      event_type: event.eventType,
+      payload_sent: rpcParams,
     });
+
+    let data, error, status, statusText;
+    try {
+      const resp = await sb.rpc('apply_session_event', rpcParams);
+      data = resp.data; error = resp.error; status = resp.status; statusText = resp.statusText;
+    } catch (e) {
+      console.error('[SYNC TRACE] apply_session_event threw (exception, not a returned error object)', {
+        session_id: event.sessionServerId, local_event_id: event.id, message: e.message, stack: e.stack,
+      });
+      return { transient: true, error: e };
+    }
 
     if (error) {
       // network / transient failure — never a validation error (those come
       // back as a normal `data.status`, not a thrown/RPC error)
+      console.info('[SYNC TRACE] RPC transport error (not a version check — never reached apply_session_event\'s logic)', {
+        session_id: event.sessionServerId,
+        local_event_id: event.id,
+        response_status: status,
+        response_statusText: statusText,
+        error_message: error.message,
+        error_code: error.code,
+        error_details: error.details,
+        error_hint: error.hint,
+        error_raw: error,
+      });
       return { transient: true, error };
     }
+
+    // server_version_before: for a conflict, data.session is the row exactly
+    // as apply_session_event() read it (to_jsonb(v_session)) BEFORE any
+    // update was attempted — i.e. the real server version at rejection time.
+    // For a success, data.version is the NEW version AFTER the update, so
+    // subtracting 1 gives what it was immediately before this event.
+    const serverVersionBefore = (data.status === 'ok' || data.status === 'duplicate_ok')
+      ? (data.version != null ? data.version - 1 : null)
+      : (data.session ? data.session.version : null);
+    console.info('[SYNC TRACE] apply_session_event response', {
+      session_id: event.sessionServerId,
+      local_event_id: event.id,
+      local_base_version: event.baseVersion,
+      response_status: status,
+      response_statusText: statusText,
+      response_body: data,
+      status: data.status,
+      conflict_type: data.conflict_type || null,
+      server_version_before: serverVersionBefore,
+      server_version_after: data.version != null ? data.version : (data.session ? data.session.version : null),
+    });
 
     if (data.status === 'ok' || data.status === 'duplicate_ok') {
       await window.OOXII_DB.syncedEventIds.mark(event.id);

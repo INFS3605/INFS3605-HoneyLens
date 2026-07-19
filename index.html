@@ -1109,7 +1109,20 @@ function I(name,size=24,stroke='#fff'){
 /* ============================ tiny helpers ============================ */
 const $ = sel => document.getElementById('screen').querySelector(sel);
 const screenEl = ()=>document.getElementById('screen');
-function go(fn){ screenEl().scrollTop=0; fn(); }
+function go(fn){ state._currentScreenFn=fn; screenEl().scrollTop=0; fn(); }
+/* Read by js/sw-register.js (a separate file — window is how it reaches
+   this) before actually acting on a "Reload and update" press, so a
+   service-worker update can never silently discard a client's unsaved
+   clinical entry or interrupt a QR handover mid-handoff. Best-effort by
+   nature (there is no per-field dirty-tracking in this prototype) — a
+   clinical data-entry screen being open at all is treated as "may have
+   unsaved input", which is the safe direction to be wrong in. */
+function isSafeToReloadNow(){
+  const hasModal = !!document.getElementById('scrim');
+  const onClinicalForm = [ScreenIntake, ScreenDistance, ScreenNear, ScreenWheel, ScreenPaddle].includes(state._currentScreenFn);
+  return !hasModal && !onClinicalForm;
+}
+window.OOXII_SAFE_TO_RELOAD_NOW = isSafeToReloadNow;
 function pillClass(s){return 's-'+s.toLowerCase().replace(/[^a-z]/g,'');}
 function toast(msg,icon='check'){
   const old=document.querySelector('.toast'); if(old)old.remove();
@@ -1186,12 +1199,47 @@ function ScreenConfigError(){
         the check fails for any reason), show the real login form.
      4. Offline? -> the offline-PIN-permit flow (a real signed-in tester
         working offline), never demo. */
+/* Development trace of the exact boot decision — never logs credentials,
+   tokens, or clinical data, only booleans/labels. Left in permanently (not
+   removed after debugging) since it's the cheapest possible tool for
+   diagnosing "why did this device end up on screen X" reports like this
+   one, and produces one short, harmless console line per boot. */
+function logAuthBoot(fields){
+  console.info('[AUTH BOOT]', fields);
+}
 async function ScreenSignIn(){
-  if(isDemoModeSession()){ return renderDemoSignIn(); }
-  if(!window.OOXII_CONFIG_VALID){ go(ScreenConfigError); return; }
-  if(!navigator.onLine){ return renderOfflineUnlock(); }
+  const trace = {
+    configValid: window.OOXII_CONFIG_VALID,
+    online: navigator.onLine,
+    demoSessionFlag: isDemoModeSession(),
+    supabaseSessionExists: null,
+    offlinePermitExists: null,
+    profileLoaded: null,
+    membershipLoaded: null,
+    routingDecision: null,
+  };
+  if(trace.demoSessionFlag){
+    trace.routingDecision = 'demo_session_flag -> renderDemoSignIn';
+    logAuthBoot(trace);
+    return renderDemoSignIn();
+  }
+  if(!window.OOXII_CONFIG_VALID){
+    trace.routingDecision = 'config_invalid -> ScreenConfigError';
+    logAuthBoot(trace);
+    go(ScreenConfigError); return;
+  }
+  if(!navigator.onLine){
+    const status = await window.OOXII_AUTH.offlinePermitStatus();
+    trace.offlinePermitExists = !!(status.exists && status.valid);
+    trace.routingDecision = trace.offlinePermitExists ? 'offline_valid_permit -> renderOfflineUnlock(PIN)' : 'offline_no_valid_permit -> renderOfflineUnlock(no-internet)';
+    logAuthBoot(trace);
+    return renderOfflineUnlock();
+  }
   screenEl().innerHTML = `<div class="pad">${header()}<div class="hint" style="margin-top:60px;text-align:center">Checking your session…</div></div>`;
-  if(await tryRestoreOnlineSession()) return;
+  const restored = await tryRestoreOnlineSession(trace);
+  if(restored){ logAuthBoot(trace); return; }
+  trace.routingDecision = 'no_valid_session_or_restore_failed -> renderOnlineSignIn';
+  logAuthBoot(trace);
   return renderOnlineSignIn();
 }
 /* A real Supabase session may already exist (the SDK persists its own JWT
@@ -1200,17 +1248,26 @@ async function ScreenSignIn(){
    missing, no festival assignment, a network hiccup) falls through to the
    REAL login form, never to Demo Mode — a stale/expired/invalid session is
    never silently treated as "fine, log in as someone else instead". */
-async function tryRestoreOnlineSession(){
+async function tryRestoreOnlineSession(trace){
+  trace = trace || {};
   try{
     const { data, error } = await window.OOXII_SUPABASE.auth.getSession();
-    if(error || !data || !data.session || !data.session.user) return false;
+    trace.supabaseSessionExists = !!(!error && data && data.session && data.session.user);
+    if(!trace.supabaseSessionExists) return false;
     const restored = await window.OOXII_AUTH.restoreSessionContext(data.session.user.id, data.session.user.email);
+    trace.profileLoaded = restored.ok;
+    trace.membershipLoaded = restored.ok;
     if(!restored.ok) return false;
     applyAuthContext(restored.context);
     window.OOXII_BACKEND.refreshCachedContext(restored.context);
+    trace.routingDecision = 'valid_supabase_session -> restored real tester -> ScreenHome';
     go(ScreenHome);
     return true;
-  }catch(e){ console.error('[OOXii] Could not check for an existing Supabase session', e); return false; }
+  }catch(e){
+    trace.error = e.message;
+    console.error('[OOXii] Could not check for an existing Supabase session', e);
+    return false;
+  }
 }
 function renderDemoSignIn(){
   screenEl().innerHTML = `<div class="pad">
@@ -1405,7 +1462,26 @@ function sidebar(){
     </div>
   </aside>`;
 }
+/* Production safeguard: a demo identity must never reach the home dashboard
+   without an explicit, THIS-session demo-mode selection. Checks both the
+   literal string a future refactor might use ("Demo Tester") and this
+   codebase's actual placeholder tester name ("Ana Tupou", state.tester's
+   default before any sign-in) — if this ever fires, something upstream
+   silently assigned a demo-like identity outside the one explicit path
+   (doDemoSignIn), which is exactly the bug class this exists to catch
+   instead of silently shipping it. */
+function assertNotAccidentalDemo(){
+  const looksLikeDemo = state.tester && (state.tester.name==='Demo Tester' || state.tester.name==='Ana Tupou');
+  if(state.authed && looksLikeDemo && !isDemoModeSession()){
+    console.error('[OOXii] SAFETY: a demo-like tester identity reached Home without an explicit demo-mode selection this session.', {testerName:state.tester.name});
+    state.authed=false;
+    go(ScreenSignIn);
+    return false;
+  }
+  return true;
+}
 function ScreenHome(){
+  if(!assertNotAccidentalDemo()) return;
   const t=state.tester;
   const st=getActiveTesterStation();
   const indiv=isIndividualMode();
@@ -1877,6 +1953,7 @@ function ScreenDispense(){
 }
 async function confirmGlasses(){
   const s=state.sessions[state.activeId]; if(!DE.canDispense(s)) return;
+  console.info('[SYNC TRACE] confirmGlasses() entered', {clientId:s.id, versionBeforeSave:s.version, serverIdBeforeSave:s._serverId});
   s.dispense={
     glassesDispensed:true,
     frameSize:$('#dp-size')?$('#dp-size').value||null:null,
@@ -2550,16 +2627,26 @@ function expandResults(cid, ver, r){
    tell apart from a compressed payload if the compression library failed
    to load — never ship a payload under the OOX2 prefix that isn't real. */
 function encodeQrPayload(s){
-  const ctx = window.OOXII_BACKEND ? window.OOXII_BACKEND.getCachedContext() : null;
-  // sid is the real client_sessions.id (server UUID) so a later sync can
-  // write to the SAME server row from either device.
-  const sid = window.OOXII_SESSIONS ? window.OOXII_SESSIONS.ensureServerId(s) : ('uuid-'+s.id);
-  const compact = { v:2, c:s.id, s:sid, f: ctx?ctx.activeFestivalId:null, e:s._lastEventId||null, n:s.version, r:compactResultsFor(s) };
-  const checksum = fnv1aHash(canonicalStringForChecksum(compact));
-  const withChecksum = Object.assign({}, compact, {k:checksum});
-  if(!window.fflate) throw new Error('Compression library (js/vendor/fflate.min.js) is not loaded');
-  const bytes = window.fflate.deflateSync(window.fflate.strToU8(JSON.stringify(withChecksum)));
-  return QR_ENC_PREFIX + b64urlEncode(bytes);
+  console.info('[QR TRACE] encodeQrPayload() entered', { clientId:s.id, version:s.version, fflateExists:!!window.fflate });
+  try{
+    const ctx = window.OOXII_BACKEND ? window.OOXII_BACKEND.getCachedContext() : null;
+    // sid is the real client_sessions.id (server UUID) so a later sync can
+    // write to the SAME server row from either device.
+    const sid = window.OOXII_SESSIONS ? window.OOXII_SESSIONS.ensureServerId(s) : ('uuid-'+s.id);
+    const compact = { v:2, c:s.id, s:sid, f: ctx?ctx.activeFestivalId:null, e:s._lastEventId||null, n:s.version, r:compactResultsFor(s) };
+    const checksum = fnv1aHash(canonicalStringForChecksum(compact));
+    const withChecksum = Object.assign({}, compact, {k:checksum});
+    const jsonString = JSON.stringify(withChecksum);
+    console.info('[QR TRACE] encodeQrPayload() compact payload built', { clientId:s.id, sid, festivalId: ctx?ctx.activeFestivalId:null, payload_length: jsonString.length });
+    if(!window.fflate) throw new Error('Compression library (js/vendor/fflate.min.js) is not loaded');
+    const bytes = window.fflate.deflateSync(window.fflate.strToU8(jsonString));
+    const encoded = QR_ENC_PREFIX + b64urlEncode(bytes);
+    console.info('[QR TRACE] encodeQrPayload() compression complete', { clientId:s.id, payload_length: jsonString.length, compressed_length: bytes.length, encoded_length: encoded.length });
+    return encoded;
+  }catch(e){
+    console.error('[QR TRACE] encodeQrPayload() threw', { clientId:s.id, message:e.message, stack:e.stack });
+    throw e;
+  }
 }
 /* Detects v2 (compressed compact) vs v1 (legacy plain JSON) and normalises
    BOTH into the same {cid,sid,fid,eid,ver,snap} shape handleScannedPayload
@@ -2587,7 +2674,10 @@ function decodeQrPayload(raw){
   return { cid:p.cid, sid:p.sid||null, fid:p.fid||null, eid:p.eid||null, ver:p.ver, snap:p.snap };
 }
 /* single source for the handover QR payload */
-function qrPayloadFor(s){ return encodeQrPayload(s); }
+function qrPayloadFor(s){
+  console.info('[QR TRACE] qrPayloadFor() entered', { clientId:s.id, version:s.version });
+  return encodeQrPayload(s);
+}
 function simulateScan(id){ closeScrim(); handleScannedPayload(qrPayloadFor(state.sessions[id])); }
 function simulateScanRaw(raw){ closeScrim(); handleScannedPayload(raw); }
 /* every scan — camera, image upload, or the demo picker — passes through
@@ -2684,6 +2774,11 @@ async function handleScannedPayload(raw){
     await window.OOXII_DB.sessions.put(opened);
     const verify = await window.OOXII_DB.sessions.get(opened.id);
     if(!verify || verify.version!==opened.version) throw new Error('readback mismatch after sessions.put');
+    // The stable Supabase session UUID must survive the write unchanged —
+    // confirming this here, not just .version, is what guarantees a QR-
+    // imported session later syncs to the SAME canonical client_sessions
+    // row the sender was writing to, not a new one.
+    if(opened._serverId && verify._serverId!==opened._serverId) throw new Error('readback mismatch: _serverId did not persist');
   }catch(e){
     console.error('[OOXii] Failed to persist imported session to IndexedDB', p.cid, e);
     showQRError('The QR was read, but this device could not save the client. Please free storage and try again.');
@@ -2752,6 +2847,7 @@ function showQRError(msg){
    modal it shows, not its own promise settling — there is nothing for a
    caller to usefully await. */
 async function showHandoverQR(id, after){
+  console.info('[QR TRACE] showHandoverQR() entered', { clientId:id, fflateExists:!!window.fflate, QRCodeExists:!!window.QRCode });
   window.__qrAfter = after||null;
   if(!window.OOXII_DB){
     showQRGenerationError('This device could not read its saved copy of this client (local storage unavailable). Nothing was generated.');
@@ -2823,7 +2919,7 @@ async function showHandoverQR(id, after){
     payload=qrPayloadFor(s);
     if(!payload) throw new Error('qrPayloadFor returned empty payload');
   }catch(e){
-    console.error('[OOXii] Failed to build the QR payload', s.id, e);
+    console.error('[QR TRACE] showHandoverQR() failed to build the QR payload', { clientId:s.id, message:e.message, stack:e.stack });
     showQRGenerationError('This device could not build the handover QR for this client. Try again.');
     return;
   }
@@ -2847,13 +2943,15 @@ async function showHandoverQR(id, after){
   // genuine generation error — shows the same clear, non-technical message;
   // the real error is only ever logged to the console, never shown or
   // encoded into the visible UI.
+  console.info('[QR TRACE] showHandoverQR() calling renderQrInto()', { clientId:s.id, payload_length: payload.length, OOXII_QR_exists: !!window.OOXII_QR, QRCodeExists: !!window.QRCode });
   let ok=false;
   try{
     ok = window.OOXII_QR ? window.OOXII_QR.renderQrInto(target, payload) : false;
   }catch(e){
-    console.error('[OOXii] QR rendering threw unexpectedly', s.id, e);
+    console.error('[QR TRACE] showHandoverQR() renderQrInto() threw unexpectedly', { clientId:s.id, message:e.message, stack:e.stack });
     ok=false;
   }
+  console.info('[QR TRACE] showHandoverQR() renderQrInto() result', { clientId:s.id, ok });
   if(!ok){
     showQRGenerationError('Unable to generate QR code. Please try again.');
   }
@@ -3411,7 +3509,27 @@ function honeycombSVG(filled,mini=false){
         state.queue = result.hydratedQueue;
       }
     }
-  }catch(e){ console.error('[OOXii] boot hydration failed, continuing with local demo data', e); }
+  }catch(e){
+    if(e && e.code==='INDEXEDDB_BLOCKED'){
+      // A real, reproduced failure mode: another tab has this device's
+      // IndexedDB open at an older version, blocking this tab's connection
+      // — the underlying request never resolves or rejects on its own (see
+      // js/indexed-db.js's onblocked handler), so this must be surfaced
+      // clearly rather than left to hang indefinitely or silently fall
+      // through to sign-in with a broken local-storage layer.
+      console.error('[OOXii] IndexedDB blocked by another open tab', e);
+      screenEl().innerHTML = `<div class="pad">${header()}
+        <div class="notice warn" style="margin-top:60px">
+          <span class="x">${I('warn',22,'#f5b945')}</span>
+          <div><div class="t">Another OOXii tab is open</div>
+          <div class="s">This device's local storage is in use by another OOXii tab or window. Close it, then tap Retry.</div></div>
+        </div>
+        <button class="btn btn-primary" style="margin-top:16px" onclick="location.reload()">Retry</button>
+      </div>`;
+      return; // do not fall through to sign-in with a non-functioning local-storage layer
+    }
+    console.error('[OOXii] boot hydration failed, continuing with local demo data', e);
+  }
   go(ScreenSignIn);
 })();
 </script>

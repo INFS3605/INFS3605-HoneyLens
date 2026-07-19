@@ -44,7 +44,20 @@
       };
       req.onsuccess = () => resolve(req.result);
       req.onerror = () => reject(req.error);
+      // Without this, a version-upgrade request that's blocked by another
+      // open connection to the same database (e.g. a second tab left open
+      // on an older version of the app) fires NEITHER onsuccess NOR
+      // onerror — it just sits there. Every caller of open() (including
+      // getCurrentContext(), which the startup/auth path depends on) would
+      // hang forever with no error and no visible sign anything was wrong.
+      // Reproduced directly during testing. Reject visibly instead.
+      req.onblocked = () => {
+        const err = new Error('IndexedDB open blocked — another tab may have this database open on an older version. Close other tabs of this app and reload.');
+        err.code = 'INDEXEDDB_BLOCKED'; // lets callers (index.html's boot()) show the specific "close other tabs" message rather than a generic failure
+        reject(err);
+      };
     });
+    dbPromise.catch(() => { dbPromise = null; }); // allow a retry (e.g. after the tester closes the other tab) instead of caching the failure forever
     return dbPromise;
   }
 

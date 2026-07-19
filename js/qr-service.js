@@ -52,6 +52,11 @@
    *  reported production bug (a white box showing the JSON as plain text
    *  instead of a scannable QR). */
   function renderQrInto(targetEl, payloadString) {
+    console.info('[QR TRACE] renderQrInto() entered', {
+      payload_length: payloadString ? payloadString.length : null,
+      QRCodeExists: !!window.QRCode,
+      fflateExists: !!window.fflate,
+    });
     targetEl.innerHTML = '';
     if (!window.QRCode) {
       console.error('[OOXii] QRCode library (js/vendor/qrcode.min.js) did not load — cannot render a QR code.');
@@ -65,9 +70,10 @@
       // immediately, not printed or handled — physical-damage resilience
       // matters far less here than fitting the complete, unmodified payload.
       new QRCode(targetEl, { text: payloadString, width: QR_SIZE_PX, height: QR_SIZE_PX, correctLevel: QRCode.CorrectLevel.L });
+      console.info('[QR TRACE] renderQrInto() succeeded', { payload_length: payloadString ? payloadString.length : null });
       return true;
     } catch (e) {
-      console.error('[OOXii] QR code generation failed for this payload', e);
+      console.error('[QR TRACE] renderQrInto() threw', { payload_length: payloadString ? payloadString.length : null, message: e.message, stack: e.stack });
       targetEl.innerHTML = '';
       return false;
     }

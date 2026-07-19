@@ -171,21 +171,67 @@
 
   /** Called by index.html right after a clinical save mutates state.sessions.
    *  `step` is one of the keys above; `session` is the just-mutated
-   *  state.sessions[id] object (already has its NEW version). */
+   *  state.sessions[id] object (already has its NEW version) — the REAL
+   *  object, not a copy.
+   *
+   *  Session-ID stability fix: this used to call ensureServerId() on a
+   *  throwaway `Object.assign({}, session, ...)` copy created fresh every
+   *  call, so every single save generated a NEW random UUID — every
+   *  clinical save for the same client targeted a DIFFERENT canonical
+   *  client_sessions row on the server (confirmed in production: server
+   *  stuck at version 1 while the client's own version counter climbed to
+   *  2, 3... — see BACKEND_IMPLEMENTATION_PLAN.md for the full trace).
+   *  ensureServerId() now runs on the REAL session object FIRST, is
+   *  persisted and read back before anything is queued, and is passed
+   *  through explicitly — persistAndQueue() no longer generates one itself. */
   async function recordEvent(step, session, station) {
-    const ctx = cachedContext || (cachedContext = await window.OOXII_AUTH.getCurrentContext());
-    const festivalId = ctx ? ctx.activeFestivalId : null;
-    const userId = ctx ? ctx.userId : null;
-    const flat = Object.assign({}, session, session.intake || {});
-    return window.OOXII_SESSIONS.persistAndQueue(flat, {
-      eventType: EVENT_TYPE[step] || 'step_saved',
-      step,
-      station: station || null,
-      payloadKeys: PAYLOAD_KEYS[step] || [],
-      baseVersion: (session.version || 1) - 1,
-      festivalId, userId,
-      mode: (appState() && appState().mode) || 'festival',
-    });
+    console.info('[SYNC TRACE] recordEvent() entered', { step, clientId: session.id, station: station||null, versionAtEntry: session.version, serverIdAtEntry: session._serverId||null });
+    try{
+      const ctx = cachedContext || (cachedContext = await window.OOXII_AUTH.getCurrentContext());
+      const festivalId = ctx ? ctx.activeFestivalId : null;
+      const userId = ctx ? ctx.userId : null;
+      console.info('[SYNC TRACE] recordEvent() context resolved', { clientId: session.id, festivalId, userId, ctxPresent: !!ctx });
+
+      const sessionServerId = window.OOXII_SESSIONS.ensureServerId(session);
+      console.info('[SYNC TRACE] recordEvent() ensureServerId result', { clientId: session.id, sessionServerId });
+
+      // Persist the REAL session (now carrying the stable _serverId) and read
+      // it back before anything is queued — never silently proceed with an
+      // event that references an ID that didn't actually get saved (a full
+      // IndexedDB, a blocked connection, etc.).
+      if(!window.OOXII_DB){
+        throw new Error('IndexedDB unavailable — cannot persist the stable session ID for '+session.id);
+      }
+      await window.OOXII_DB.sessions.put(session);
+      const verify = await window.OOXII_DB.sessions.get(session.id);
+      console.info('[SYNC TRACE] recordEvent() IndexedDB readback', { clientId: session.id, expectedServerId: sessionServerId, readBackServerId: verify ? verify._serverId : null, match: !!(verify && verify._serverId===sessionServerId) });
+      if(!verify || verify._serverId!==sessionServerId){
+        throw new Error('Stable session ID (_serverId) failed to persist for '+session.id+' — refusing to queue an event that references an unconfirmed ID');
+      }
+
+      const flat = Object.assign({}, session, session.intake || {});
+      flat._serverId = sessionServerId; // carry the stable ID explicitly — persistAndQueue() must never (re)generate one
+      const baseVersion = (session.version || 1) - 1;
+      const eventType = EVENT_TYPE[step] || 'step_saved';
+      console.info('[SYNC TRACE] recordEvent() calling persistAndQueue()', {
+        clientId: session.id, sessionServerId, local_base_version: baseVersion, local_version: session.version, event_type: eventType, step,
+      });
+      const event = await window.OOXII_SESSIONS.persistAndQueue(flat, {
+        sessionServerId,
+        eventType,
+        step,
+        station: station || null,
+        payloadKeys: PAYLOAD_KEYS[step] || [],
+        baseVersion,
+        festivalId, userId,
+        mode: (appState() && appState().mode) || 'festival',
+      });
+      console.info('[SYNC TRACE] recordEvent() returning', { clientId: session.id, local_event_id: event ? event.id : null });
+      return event;
+    }catch(e){
+      console.error('[SYNC TRACE] recordEvent() threw', { clientId: session.id, step, message: e.message, stack: e.stack });
+      throw e;
+    }
   }
 
   /** Online lookup, scoped to the tester's own active festival membership —

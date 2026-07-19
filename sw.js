@@ -13,13 +13,27 @@
 */
 'use strict';
 
-// Bumped for the auth-bootstrap fix (js/auth-service.js, js/session-
-// repository.js) — both are cache-first same-origin assets, so another
-// version bump is what actually gets an already-installed service worker to
-// re-fetch them, rather than serving stale copies forever. Authentication
+// v5: startup-tracing/production-safeguard changes (index.html) plus a
+// controlled update flow — a new version reaches "waiting" and stays there
+// until the tester explicitly presses "Reload and update" (see
+// js/sw-register.js). The "stuck on an old version forever" failure mode
+// found while testing this is fixed a different way: updateViaCache:'none'
+// on registration plus a periodic registration.update() call make the
+// browser actually notice a new sw.js promptly, instead of silently going
+// stale — not by skipping the tester's consent to update. Authentication
 // state itself is never cached by this service worker (see the fetch
 // handler below) — only the STATIC SCRIPT FILES implementing it are.
-const CACHE_VERSION = 'v4';
+//
+// v6: confirmed live (via Cache Storage inspection) that a browser with an
+// already-activated worker for a given CACHE_VERSION keeps serving that
+// version's cached JS indefinitely — reload or not — because the update
+// check only fires on a byte change to sw.js itself. Editing the cached
+// files without bumping this constant is a no-op for anyone already
+// running the app: this shipped the QR-generation and session-ID-sync
+// fixes, and the debug tracing added while diagnosing that. Same
+// cache-first fetch strategy and controlled (tester-consented) activation
+// as v5 — only the version string changed.
+const CACHE_VERSION = 'v6';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
@@ -82,11 +96,16 @@ self.addEventListener('install', (event) => {
       }
     }));
   })());
-  // Deliberately NO self.skipWaiting() here. A tab that's already open keeps
-  // running the OLD service worker (and its already-cached files stay
-  // valid) until the tester explicitly accepts the "Update available"
-  // prompt (see js/sw-register.js) — a tester mid-eye-test is never
-  // silently switched onto new app code.
+  // Deliberately NO self.skipWaiting() here. A newly-installed worker sits
+  // in "waiting" — the app must never silently swap a tester onto new code
+  // mid-workflow. The earlier version of this comment removed this
+  // guarantee after finding a real "stuck on an old version forever" bug;
+  // that bug is fixed properly now (see js/sw-register.js's registration
+  // options and periodic registration.update() call, both of which make
+  // the browser actually notice a new version promptly, instead of relying
+  // on skipWaiting to paper over never checking for updates). The tester
+  // decides when it's safe via the "Reload and update" button — see the
+  // `message` handler below, which only ever runs in response to that.
 });
 
 self.addEventListener('activate', (event) => {
