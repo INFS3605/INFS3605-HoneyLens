@@ -21,6 +21,9 @@
   'use strict';
 
   const READER_ELEMENT_ID = 'qr-camera-reader';
+  // 260-320px range for a comfortably scannable handover QR; index.html's
+  // handover modal is sized to fit this (see showHandoverQR).
+  const QR_SIZE_PX = 280;
   let html5QrCode = null;
   let scanning = false;
   let lastHandledText = null;
@@ -39,21 +42,40 @@
     return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia) && typeof window.Html5Qrcode !== 'undefined';
   }
 
-  /** Real QR generation — unchanged behaviour from the original prototype,
-   *  just extracted into this module. */
+  /** Real QR generation. Returns true on success, false if the library isn't
+   *  loaded or generation genuinely failed (e.g. this vendored qrcodejs
+   *  build throws once a payload exceeds its encodable capacity — confirmed
+   *  happens for a fully-populated handover payload, ~2.3KB+, at the
+   *  library's default error-correction level). The caller (index.html's
+   *  showHandoverQR) decides what the tester sees on failure — this
+   *  function NEVER renders the raw payload text itself; that was the
+   *  reported production bug (a white box showing the JSON as plain text
+   *  instead of a scannable QR). */
   function renderQrInto(targetEl, payloadString) {
+    console.info('[QR TRACE] renderQrInto() entered', {
+      payload_length: payloadString ? payloadString.length : null,
+      QRCodeExists: !!window.QRCode,
+      fflateExists: !!window.fflate,
+    });
     targetEl.innerHTML = '';
+    if (!window.QRCode) {
+      console.error('[OOXii] QRCode library (js/vendor/qrcode.min.js) did not load — cannot render a QR code.');
+      return false;
+    }
     try {
-      if (window.QRCode) {
-        new QRCode(targetEl, { text: payloadString, width: 190, height: 190, correctLevel: QRCode.CorrectLevel.M });
-        return;
-      }
-      throw new Error('no lib');
+      // Error-correction level L (lowest redundancy, maximum data capacity)
+      // — deliberately not the library's default (M). The handover payload
+      // legitimately runs to 2-3KB once Wheel/Paddle/notes are all
+      // populated, and this QR is shown on a clean screen and scanned
+      // immediately, not printed or handled — physical-damage resilience
+      // matters far less here than fitting the complete, unmodified payload.
+      new QRCode(targetEl, { text: payloadString, width: QR_SIZE_PX, height: QR_SIZE_PX, correctLevel: QRCode.CorrectLevel.L });
+      console.info('[QR TRACE] renderQrInto() succeeded', { payload_length: payloadString ? payloadString.length : null });
+      return true;
     } catch (e) {
-      const pre = document.createElement('div');
-      pre.className = 'qr-fallback';
-      pre.textContent = payloadString;
-      targetEl.appendChild(pre);
+      console.error('[QR TRACE] renderQrInto() threw', { payload_length: payloadString ? payloadString.length : null, message: e.message, stack: e.stack });
+      targetEl.innerHTML = '';
+      return false;
     }
   }
 

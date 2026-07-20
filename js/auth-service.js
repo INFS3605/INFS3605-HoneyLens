@@ -60,35 +60,49 @@
   }
 
   async function loadProfileAndMemberships(userId) {
+    console.info('[AUTH TRACE] loadProfileAndMemberships() entered', { userId });
     const sb = window.OOXII_SUPABASE;
     const { data: profile, error: profErr } = await sb.from('profiles').select('*').eq('id', userId).single();
-    if (profErr || !profile) return { error: 'Could not load your tester profile. Ask a coordinator to check your account.' };
-    if (!profile.is_active) return { error: 'Your tester account is inactive. Ask a coordinator to reactivate it.' };
+    console.info('[AUTH TRACE] loadProfileAndMemberships() profiles query result', {
+      userId, found: !!profile, error: profErr ? profErr.message : null,
+      display_name: profile ? profile.display_name : null, is_active: profile ? profile.is_active : null,
+    });
+    if (profErr || !profile) { console.info('[AUTH TRACE] loadProfileAndMemberships() failing: no profile row / query error', { userId }); return { error: 'Could not load your tester profile. Ask a coordinator to check your account.' }; }
+    if (!profile.is_active) { console.info('[AUTH TRACE] loadProfileAndMemberships() failing: profile.is_active is false', { userId }); return { error: 'Your tester account is inactive. Ask a coordinator to reactivate it.' }; }
 
     const { data: memberships, error: memErr } = await sb
       .from('festival_members')
       .select('festival_id, member_role, allowed_stations, is_active, festivals ( id, name, village, status, timezone )')
       .eq('user_id', userId).eq('is_active', true);
-    if (memErr) return { error: 'Could not load your festival assignments.' };
+    console.info('[AUTH TRACE] loadProfileAndMemberships() festival_members query result', {
+      userId, error: memErr ? memErr.message : null, membershipCount: memberships ? memberships.length : null,
+    });
+    if (memErr) { console.info('[AUTH TRACE] loadProfileAndMemberships() failing: festival_members query error', { userId }); return { error: 'Could not load your festival assignments.' }; }
     if (!memberships || memberships.length === 0) {
+      console.info('[AUTH TRACE] loadProfileAndMemberships() failing: no active festival membership', { userId });
       return { error: 'You are not assigned to any festival yet. Ask a coordinator to add you.' };
     }
+    console.info('[AUTH TRACE] loadProfileAndMemberships() succeeded — no fallback identity used', { userId, display_name: profile.display_name });
     return { profile, memberships };
   }
 
-  async function signInOnline(email, password) {
-    if (!window.OOXII_CONFIG_VALID) return { ok: false, error: 'App is not configured yet — see SUPABASE_SETUP.md.' };
-    if (!navigator.onLine) return { ok: false, error: 'The first sign-in on this device must happen online.' };
-    const sb = window.OOXII_SUPABASE;
-    const { data, error } = await sb.auth.signInWithPassword({ email, password });
-    if (error || !data.user) return { ok: false, error: friendlyAuthError(error) };
-
-    const loaded = await loadProfileAndMemberships(data.user.id);
-    if (loaded.error) { await sb.auth.signOut(); return { ok: false, error: loaded.error }; }
-
+  /** Builds and persists the same `context` shape from a userId/email we
+   *  already know is currently valid (either a fresh password sign-in, or an
+   *  existing Supabase session found on boot) — the ONLY place that shape is
+   *  built, so a restored session and a fresh sign-in can never drift apart.
+   *  Every failure here (inactive/missing profile, no festival assignment,
+   *  a query error) is reported as a plain error — the caller decides what
+   *  to show; this function never itself falls back to any other identity. */
+  async function restoreSessionContext(userId, email) {
+    console.info('[AUTH TRACE] restoreSessionContext() entered', { userId, email });
+    const loaded = await loadProfileAndMemberships(userId);
+    if (loaded.error) {
+      console.info('[AUTH TRACE] restoreSessionContext() profile loading failed — returning ok:false, no fallback identity assigned', { userId, error: loaded.error });
+      return { ok: false, error: loaded.error };
+    }
     const context = {
-      userId: data.user.id,
-      email: data.user.email,
+      userId,
+      email,
       displayName: loaded.profile.display_name,
       appRole: loaded.profile.app_role,
       festivals: loaded.memberships.map((m) => ({
@@ -101,8 +115,23 @@
       activeFestivalId: loaded.memberships[0].festival_id,
       signedInAt: nowIso(),
     };
+    console.info('[AUTH TRACE] restoreSessionContext() built context from the REAL profile row (not a fallback)', {
+      userId, displayName: context.displayName, appRole: context.appRole, activeFestivalId: context.activeFestivalId,
+    });
     await window.OOXII_DB.context.set(context);
-    return { ok: true, context, needsOfflinePin: true };
+    return { ok: true, context };
+  }
+
+  async function signInOnline(email, password) {
+    if (!window.OOXII_CONFIG_VALID) return { ok: false, error: 'App is not configured yet — see SUPABASE_SETUP.md.' };
+    if (!navigator.onLine) return { ok: false, error: 'The first sign-in on this device must happen online.' };
+    const sb = window.OOXII_SUPABASE;
+    const { data, error } = await sb.auth.signInWithPassword({ email, password });
+    if (error || !data.user) return { ok: false, error: friendlyAuthError(error) };
+
+    const restored = await restoreSessionContext(data.user.id, data.user.email);
+    if (!restored.ok) { await sb.auth.signOut(); return { ok: false, error: restored.error }; }
+    return { ok: true, context: restored.context, needsOfflinePin: true };
   }
 
   async function setOfflinePin(pin) {
@@ -170,7 +199,7 @@
   }
 
   window.OOXII_AUTH = {
-    signInOnline, setOfflinePin, offlinePermitStatus, unlockOffline,
+    signInOnline, restoreSessionContext, setOfflinePin, offlinePermitStatus, unlockOffline,
     getCurrentContext, refreshOnlineSession, pendingUnsyncedCount, signOut,
   };
 })();

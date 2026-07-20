@@ -209,3 +209,44 @@ outstanding:
   service-role key" constraint.
 - **The literal 30-day offline-permit expiry (#6)** — verified the comparison
   logic, not real elapsed time.
+
+## Session-ID instability bug (fixed) — data repair guidance for the live project
+
+Before this fix, `recordEvent()` called `ensureServerId()` on a throwaway object
+created fresh on every save, so every clinical save for the same client generated a
+**new random `client_sessions.id`**. Any client tested against the live Supabase
+project before this fix landed will have its clinical steps split across **multiple
+`client_sessions` rows** — one per save that happened to be the first to sync
+successfully for its (accidentally unique) session ID — plus a `sync_conflicts` row
+for every subsequent save (`server_version = 1` vs a climbing `local_base_version`).
+
+**Which rows are affected:** any `client_sessions` row created before this fix was
+deployed and tested — in practice, anything created during this debugging session
+(the evidence you shared: rows with `session_events` empty and matching
+`sync_conflicts` entries). There is no reliable way to tell from the data alone
+which of several same-`client_id` rows was "first" without checking `created_at`
+timestamps and cross-referencing device/tester — this is exactly why an automatic
+merge is not safe.
+
+**Do not automatically merge these split rows.** A client_id can legitimately be
+reused in normal operation (it's a short human-typed anonymous ID, not the primary
+key), so merging by `client_id` alone risks silently combining two *different*
+clients' data. Any merge must be a deliberate, manual decision by someone who can
+confirm the rows really are the same person's session (e.g. by comparing
+`festival_id`, `registered_at`, and clinical field values).
+
+**For a clean retest:** use a **fresh anonymous client ID** (a new
+`newAnonId()` — don't reuse `S93-O` or any ID exercised while investigating this
+bug) so there is no pre-existing split state for the new test to interact with.
+
+**Old conflict rows:** the pre-fix `sync_conflicts` rows are now historical noise —
+they document a bug that's fixed, not a live data-integrity issue. Whether to
+delete them is your call, not something this change does automatically:
+- Keep them if you want an audit trail of what happened during this investigation.
+- Delete them (`delete from sync_conflicts where detected_at < '<fix deployment
+  time>'`) if you'd rather start the conflict-review queue clean — safe to do,
+  since they don't reference data that needs preserving beyond the `session_id`s
+  they already told you about above.
+- Either way, the orphaned pre-fix `client_sessions` rows (empty `session_events`,
+  stuck at `version = 1`) are safe to leave alone or delete at your discretion —
+  they hold no data beyond what was already visible in the conflict payloads.

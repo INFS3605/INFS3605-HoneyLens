@@ -306,6 +306,33 @@ guarantee. `sw.js` (repo root, so its default scope is `/`, the whole site) plus
 - The app must load successfully online at least once, so the service worker itself
   can install and cache the shell, before offline reopening is guaranteed.
 
+## 3c. QR transport schema v2 — compact + compressed payload
+
+A fully-populated Wheel+Paddle session's plain-JSON QR payload (schema v1, ~2.3KB)
+was confirmed too dense to reliably decode at any screen-scannable size — this was
+a real production bug (see `BACKEND_TEST_PLAN.md`). Fixed with schema v2
+(`encodeQrPayload`/`decodeQrPayload` in `index.html`): an explicit field allowlist
+(drops everything derivable, duplicated, or never read on a receiving device — see
+the audit table there), short keys, then real deflate compression (vendored
+`js/vendor/fflate.min.js`, no CDN), base64url-encoded with an `OOX2:` prefix. v1
+plain-JSON QR codes still decode unchanged — `decodeQrPayload` detects the format
+and normalises both into the same shape the existing schema/festival/duplicate/
+stale-version checks already validate. Result: the worst realistic payload went
+from ~2.3KB (undecodable) to ~340 bytes (reliably decodes via the real vendored
+`Html5Qrcode` image-scan path — see `BACKEND_TEST_PLAN.md` for the fixture results).
+
+**Integrity check — read this before relying on it for anything else.** The v2
+payload carries a short **FNV-1a** checksum (32-bit, hex-encoded). This detects
+**accidental corruption or incomplete QR data** — a damaged scan, a partial read,
+a bit flipped in transit — and that is its *only* job. **It is not cryptographic
+protection.** FNV-1a has no collision resistance and no secret key, so it cannot
+detect a deliberate, malicious modification made by anyone who can compute the
+same hash function (which is public, right here in `index.html`). No code in this
+app treats a passing checksum as a claim of authenticity, only as "not
+accidentally damaged" — and nothing downstream should ever be changed to assume
+otherwise. A real authenticity/tamper-evidence guarantee would require a keyed MAC
+or signature, which this deliberately is not.
+
 ## 4. What currently disappears vs. persists
 
 | Data | Persistence today |
