@@ -328,12 +328,82 @@
 
   const VILLAGES_LIST = ['Port Vila', 'Mele', 'Pango', 'Lelepa', 'Erakor', 'Ifira', 'Eratap', 'Other (camp area)'];
 
+  /* ============================ Exports ============================ */
+  function downloadRows(rows, filenameBase, format) {
+    if (!rows.length) { toast('Nothing to export.'); return; }
+    let blob, ext;
+    if (format === 'json') {
+      blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json' });
+      ext = 'json';
+    } else {
+      const cols = Object.keys(rows[0]);
+      const lines = [cols.join(',')].concat(rows.map((r) => cols.map((c) => csvEscape(r[c])).join(',')));
+      blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+      ext = 'csv';
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `${filenameBase}-${new Date().toISOString().slice(0, 10)}.${ext}`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast(`Exported ${rows.length} row${rows.length === 1 ? '' : 's'} as ${ext.toUpperCase()}.`);
+  }
+
+  async function doExport(kind, format) {
+    try {
+      if (kind === 'festivals') {
+        downloadRows(await AdminData.getFestivals(), 'ooxii-festivals', format);
+      } else if (kind === 'devices') {
+        downloadRows(await AdminData.getDeviceStatus(), 'ooxii-devices', format);
+      } else if (kind === 'clinical') {
+        const [distance, near, funnel, pathways] = await Promise.all([
+          AdminData.getDistanceOutcomes(), AdminData.getNearOutcomes(),
+          AdminData.getCompletionFunnel(), AdminData.getPathwayFrequencies(),
+        ]);
+        const rows = [
+          ...distance.map((r) => ({ metric: 'distance_outcome', key: r.outcome, value: r.n })),
+          ...near.map((r) => ({ metric: 'near_outcome', key: r.outcome, value: r.n })),
+          ...pathways.map((r) => ({ metric: 'pathway', key: r.route, value: r.n })),
+          ...Object.entries(funnel).map(([k, v]) => ({ metric: 'funnel_stage', key: k, value: v })),
+        ];
+        downloadRows(rows, 'ooxii-clinical-summary', format);
+      } else if (kind === 'research') {
+        downloadRows(await AdminData.getResearchSessions({}), 'ooxii-research-full', format);
+      }
+    } catch (e) {
+      console.error('[OOXii Admin] export failed', kind, e);
+      toast('Export failed: ' + (e.message || 'unknown error'));
+    }
+  }
+
+  function ScreenExports() {
+    const card = (title, desc, kind) => `
+      <div class="card">
+        <h3>${title}</h3><p class="sub">${desc}</p>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button class="btn btn-ghost" style="width:auto" onclick="AdminApp.doExport('${kind}','csv')">Download CSV</button>
+          <button class="btn btn-ghost" style="width:auto" onclick="AdminApp.doExport('${kind}','json')">Download JSON</button>
+        </div>
+      </div>`;
+    $main().innerHTML = `
+      <div class="page-head"><div><h1>Exports</h1><p>CSV opens directly in Excel/Sheets; JSON is for programmatic use. All exports are read-only snapshots — no data is modified.</p></div></div>
+      <div class="grid-2">
+        ${card('Festival report', 'Every festival — name, village, dates, status.', 'festivals')}
+        ${card('Device report', 'Every device — festival, tester, last sync, sessions, status.', 'devices')}
+      </div>
+      <div class="grid-2">
+        ${card('Clinical report', 'Distance/near outcomes, completion funnel, and pathway frequencies, festival-wide.', 'clinical')}
+        ${card('Research report', 'Full anonymised session dataset (up to 2000 rows) — same fields as the Researchers page, unfiltered. Use Researchers for a filtered subset.', 'research')}
+      </div>
+    `;
+  }
+
   const SCREENS = {
     dashboard: ScreenDashboard,
     devices: ScreenDevices,
     festivals: ScreenFestivals,
     researchers: ScreenResearchers,
-    exports: placeholder('Exports', 'CSV / Excel / JSON report generation — coming in a follow-up commit on this branch.'),
+    exports: ScreenExports,
     settings: placeholder('Settings', 'Portal preferences — coming in a follow-up commit on this branch.'),
   };
 
@@ -353,6 +423,6 @@
     go('dashboard');
   }
 
-  window.AdminApp = { go, doSignIn, signOut, applyResearchFilters, exportResearchCsv: downloadResearchCsv };
+  window.AdminApp = { go, doSignIn, signOut, applyResearchFilters, exportResearchCsv: downloadResearchCsv, doExport };
   document.addEventListener('DOMContentLoaded', boot);
 })();
