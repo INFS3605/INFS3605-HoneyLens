@@ -117,11 +117,11 @@
 
   /* ============================ Dashboard ============================ */
   async function ScreenDashboard() {
-    const [kpis, daily, distanceOut, nearOut, funnel, pathways, ageDist, genderDist, villageDist, lensPower, throughput] = await Promise.all([
+    const [kpis, daily, distanceOut, nearOut, funnel, pathways, ageDist, genderDist, villageDist, lensPower, throughput, dq] = await Promise.all([
       AdminData.getKpis(), AdminData.getDailyClients(30), AdminData.getDistanceOutcomes(),
       AdminData.getNearOutcomes(), AdminData.getCompletionFunnel(), AdminData.getPathwayFrequencies(),
       AdminData.getAgeDistribution(), AdminData.getGenderDistribution(), AdminData.getVillageDistribution(),
-      AdminData.getLensPowerDistribution(), AdminData.getFestivalThroughput(),
+      AdminData.getLensPowerDistribution(), AdminData.getFestivalThroughput(), AdminData.getDataQuality(),
     ]);
 
     const kpiDefs = [
@@ -206,6 +206,21 @@
       <div class="grid-2">
         <div class="card"><h3>Village distribution</h3><p class="sub">Top 8 villages by client count</p>
           ${villageBars.length ? AdminCharts.barChart(villageBars, {height:180}) : '<div class="empty">No clients yet.</div>'}</div>
+      </div>
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin:0 0 3px">Data quality</h3>
+        <p class="sub">Missing optional fields, incomplete sessions, and sync conflicts. Some PRD metrics (duplicate QR scans, average sync delay, offline queue size) aren't visible server-side — see README.</p>
+        <table><thead><tr><th>Metric</th><th>Count</th><th>% of ${dq.total_sessions} sessions</th></tr></thead><tbody>
+          <tr><td>Missing age band</td><td>${dq.missing_age_band}</td><td>${dq.total_sessions ? Math.round(100*dq.missing_age_band/dq.total_sessions) : 0}%</td></tr>
+          <tr><td>Missing village</td><td>${dq.missing_village}</td><td>${dq.total_sessions ? Math.round(100*dq.missing_village/dq.total_sessions) : 0}%</td></tr>
+          <tr><td>Missing gender</td><td>${dq.missing_gender}</td><td>${dq.total_sessions ? Math.round(100*dq.missing_gender/dq.total_sessions) : 0}%</td></tr>
+          <tr><td>Missing cataract history</td><td>${dq.missing_cataract}</td><td>${dq.total_sessions ? Math.round(100*dq.missing_cataract/dq.total_sessions) : 0}%</td></tr>
+          <tr><td>Incomplete sessions (not Finalised)</td><td>${dq.incomplete_sessions}</td><td>${dq.total_sessions ? Math.round(100*dq.incomplete_sessions/dq.total_sessions) : 0}%</td></tr>
+          <tr><td>Sync conflicts</td><td>${dq.conflicts}</td><td>—</td></tr>
+          <tr><td style="color:var(--dimmer);font-style:italic">Duplicate QR scans</td><td colspan="2" style="color:var(--dimmer);font-style:italic">Not tracked server-side</td></tr>
+          <tr><td style="color:var(--dimmer);font-style:italic">Average sync delay</td><td colspan="2" style="color:var(--dimmer);font-style:italic">Not tracked server-side</td></tr>
+          <tr><td style="color:var(--dimmer);font-style:italic">Offline queue size</td><td colspan="2" style="color:var(--dimmer);font-style:italic">Only visible on-device, until synced</td></tr>
+        </tbody></table>
       </div>
     `;
   }

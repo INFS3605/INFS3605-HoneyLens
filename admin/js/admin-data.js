@@ -95,6 +95,12 @@
     return data || [];
   }
 
+  async function getDataQuality() {
+    const { data, error } = await sb().from('v_admin_data_quality').select('*').single();
+    if (error) throw error;
+    return data;
+  }
+
   /**
    * Filtered, flattened research dataset (v_admin_research_sessions).
    * filters: { dateFrom, dateTo, festivalId, village, ageBand, gender,
@@ -124,6 +130,6 @@
     getCompletionFunnel, getPathwayFrequencies, getDeviceStatus,
     getFestivals, getSyncConflicts, getResearchSessions,
     getAgeDistribution, getGenderDistribution, getVillageDistribution,
-    getLensPowerDistribution, getFestivalThroughput,
+    getLensPowerDistribution, getFestivalThroughput, getDataQuality,
   };
 })();
