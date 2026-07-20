@@ -171,12 +171,12 @@
     // server_version_before: for a conflict, data.session is the row exactly
     // as apply_session_event() read it (to_jsonb(v_session)) BEFORE any
     // update was attempted — i.e. the real server version at rejection time.
-    // For a success (including already_applied, which never increments the
-    // version — see migration 004), data.version is the CURRENT version, so
-    // subtracting 1 only makes sense for a genuine 'ok' (a real increment
-    // just happened); already_applied/duplicate_ok reuse data.session's
-    // as-is version for both before and after, since nothing changed.
-    const serverVersionBefore = data.status === 'ok'
+    // For a real increment (ok, or merged_missing_fields — see migration
+    // 005, which increments version exactly once when it fills empty
+    // fields), data.version is the version AFTER that increment, so
+    // subtracting 1 gives the before-value; already_applied/duplicate_ok
+    // never increment, so data.session's version is both before and after.
+    const serverVersionBefore = (data.status === 'ok' || data.status === 'merged_missing_fields')
       ? (data.version != null ? data.version - 1 : null)
       : (data.session ? data.session.version : (data.version != null ? data.version : null));
     console.info('[SYNC TRACE] apply_session_event response', {
@@ -192,12 +192,14 @@
       server_version_after: data.version != null ? data.version : (data.session ? data.session.version : null),
     });
 
-    // 'already_applied' (see migration 004_handle_identical_stale_events.sql):
-    // this event's supplied fields already exactly matched the canonical
-    // row — treated exactly like a real success, never as a conflict. The
-    // canonical session snapshot is still applied locally (harmless — it's
-    // already identical to what this event would have produced).
-    if (data.status === 'ok' || data.status === 'duplicate_ok' || data.status === 'already_applied') {
+    // 'already_applied' (migration 004): this event's supplied fields
+    // already exactly matched the canonical row. 'merged_missing_fields'
+    // (migration 005): this event's fields were a strict fill-null-only
+    // merge — every supplied field was either identical or filled a
+    // currently-empty column, never overwrote a genuine disagreement.
+    // Both are treated exactly like a real success, never as a conflict —
+    // the canonical session snapshot is applied locally either way.
+    if (data.status === 'ok' || data.status === 'duplicate_ok' || data.status === 'already_applied' || data.status === 'merged_missing_fields') {
       await window.OOXII_DB.syncedEventIds.mark(event.id);
       await window.OOXII_DB.pendingEvents.remove(event.id);
       await applyServerSnapshot(event.clientId, data.session);
@@ -326,6 +328,36 @@
 
   // triggers: on load (if already online), and whenever the browser regains connectivity
   window.addEventListener('online', () => { syncNow().catch(() => {}); });
+
+  // Periodic reconnect safety net — NOT the primary sync trigger (save-time,
+  // boot, 'online', and manual "Sync now" all remain exactly as they were);
+  // this only covers the gap where a device comes back online without any
+  // of those firing (e.g. connectivity returns silently, or the browser
+  // doesn't fire a genuine 'online' event for the transition). A
+  // conservative 50s interval — frequent enough that a tester never has to
+  // reload the page to see a reconnect picked up, infrequent enough not to
+  // hammer the RPC. Every check below is deliberately cheap and read-only
+  // before ever calling syncNow(), which itself already handles "already
+  // running" (Web Locks) and "nothing to do" safely — this is just about
+  // not bothering to try in the first place when it's obviously pointless
+  // (demo mode, not signed in, offline, or genuinely nothing queued).
+  const PERIODIC_SYNC_INTERVAL_MS = 50000;
+  setInterval(async () => {
+    if (!window.OOXII_CONFIG_VALID || !navigator.onLine) return;
+    // `state` is index.html's top-level const — see applyServerSnapshot()'s
+    // comment above for why the bare identifier (not window.state) is the
+    // correct way to reach it from this file.
+    const st = (typeof state !== 'undefined') ? state : null;
+    if (!st || !st.authed || st.authMode === 'demo') return; // never in Demo Mode
+    try {
+      const pending = await window.OOXII_DB.pendingEvents.all();
+      if (!pending.length) return;
+    } catch (e) {
+      return; // can't check IndexedDB right now — skip this tick, try again next interval
+    }
+    console.info('[SYNC TRACE] periodic reconnect sync firing', { intervalMs: PERIODIC_SYNC_INTERVAL_MS });
+    syncNow().catch(() => {});
+  }, PERIODIC_SYNC_INTERVAL_MS);
 
   window.OOXII_SYNC = { syncNow, getSyncStatus };
 })();
