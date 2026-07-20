@@ -223,11 +223,116 @@
     `;
   }
 
+  /* ============================ Researchers ============================ */
+  const AGE_BANDS = ['0–9', '10–19', '20–34', '35–44', '45–54', '55–64', '65+'];
+  const PADDLE_POWERS = ['+0.75', '+1.00', '+1.25', '+1.50', '+1.75', '+2.00', '+2.25', '+2.50', '+3.00'];
+  let researchFilters = {};
+  let researchRows = [];
+  let researchFestivals = [];
+
+  function csvEscape(v) {
+    if (v == null) return '';
+    const s = String(v);
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  }
+
+  function downloadResearchCsv() {
+    if (!researchRows.length) { toast('Nothing to export — adjust your filters.'); return; }
+    const cols = ['client_id', 'festival_name', 'village', 'age_band', 'gender', 'cataract', 'status', 'route',
+      'distance_outcome', 'near_outcome', 'wheel_right_lens_type', 'wheel_right_sphere', 'wheel_left_lens_type',
+      'wheel_left_sphere', 'paddle_power', 'glasses_dispensed', 'registered_at', 'finalised_at'];
+    const lines = [cols.join(',')].concat(researchRows.map((r) => cols.map((c) => csvEscape(r[c])).join(',')));
+    const blob = new Blob([lines.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `ooxii-research-export-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    toast(`Exported ${researchRows.length} anonymised rows.`);
+  }
+
+  function readResearchFiltersFromForm() {
+    const v = (id) => document.getElementById(id).value || undefined;
+    researchFilters = {
+      dateFrom: v('rf-from'), dateTo: v('rf-to'), festivalId: v('rf-festival'),
+      village: v('rf-village'), ageBand: v('rf-age'), gender: v('rf-gender'),
+      route: v('rf-route'), distanceOutcome: v('rf-distance'), nearOutcome: v('rf-near'),
+      paddlePower: v('rf-paddle'),
+    };
+  }
+
+  async function applyResearchFilters() {
+    readResearchFiltersFromForm();
+    document.getElementById('rf-results').innerHTML = '<div class="loading">Querying…</div>';
+    researchRows = await AdminData.getResearchSessions(researchFilters);
+    renderResearchResults();
+  }
+
+  function renderResearchResults() {
+    const rows = researchRows;
+    const villages = new Set(rows.map((r) => r.village).filter(Boolean));
+    const festivals = new Set(rows.map((r) => r.festival_id).filter(Boolean));
+    const shown = rows.slice(0, 200);
+    document.getElementById('rf-results').innerHTML = `
+      <div class="grid-3" style="margin-bottom:16px">
+        <div class="card"><h3>Matching sessions</h3><div class="n" style="font-size:26px;font-weight:800">${rows.length}</div></div>
+        <div class="card"><h3>Villages covered</h3><div class="n" style="font-size:26px;font-weight:800">${villages.size}</div></div>
+        <div class="card"><h3>Festivals covered</h3><div class="n" style="font-size:26px;font-weight:800">${festivals.size}</div></div>
+      </div>
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+          <div><h3 style="margin:0">Dataset explorer</h3><p class="sub" style="margin:2px 0 0">${rows.length ? `Showing ${shown.length} of ${rows.length}` : 'No matching sessions'}</p></div>
+          <button class="btn btn-primary" style="width:auto" onclick="AdminApp.exportResearchCsv()">Export CSV (anonymised)</button>
+        </div>
+        ${rows.length ? `<div style="overflow-x:auto"><table><thead><tr>
+          <th>Client</th><th>Festival</th><th>Village</th><th>Age band</th><th>Gender</th>
+          <th>Route</th><th>Distance</th><th>Near</th><th>Paddle</th><th>Registered</th>
+        </tr></thead><tbody>${shown.map((r) => `<tr>
+          <td>${AdminCharts.esc(r.client_id)}</td><td>${AdminCharts.esc(r.festival_name || '—')}</td>
+          <td>${AdminCharts.esc(r.village || '—')}</td><td>${AdminCharts.esc(r.age_band || '—')}</td>
+          <td>${AdminCharts.esc(r.gender || '—')}</td><td><span class="chip dim">${AdminCharts.esc(r.route)}</span></td>
+          <td>${r.distance_outcome ? `<span class="chip ${r.distance_outcome === 'pass' ? 'green' : 'red'}">${r.distance_outcome}</span>` : '—'}</td>
+          <td>${r.near_outcome ? `<span class="chip ${r.near_outcome === 'pass' ? 'green' : 'red'}">${r.near_outcome}</span>` : '—'}</td>
+          <td>${AdminCharts.esc(r.paddle_power || '—')}</td><td>${fmtDate(r.registered_at)}</td>
+        </tr>`).join('')}</tbody></table></div>` : '<div class="empty">Try widening your filters.</div>'}
+      </div>
+    `;
+  }
+
+  async function ScreenResearchers() {
+    researchFestivals = await AdminData.getFestivals();
+    const opt = (arr, valKey, labelKey) => arr.map((x) => `<option value="${AdminCharts.esc(typeof x === 'string' ? x : x[valKey])}">${AdminCharts.esc(typeof x === 'string' ? x : x[labelKey])}</option>`).join('');
+    $main().innerHTML = `
+      <div class="page-head"><div><h1>Researchers</h1><p>Anonymised, session-level dataset — no names, no phone/email/address, no full date of birth. Age band, village and gender only, matching how the tester app records them.</p></div></div>
+      <div class="card" style="margin-bottom:16px">
+        <h3 style="margin:0 0 12px">Filters</h3>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px">
+          <div class="field"><label>From</label><input type="date" id="rf-from"></div>
+          <div class="field"><label>To</label><input type="date" id="rf-to"></div>
+          <div class="field"><label>Festival</label><select id="rf-festival"><option value="">Any</option>${opt(researchFestivals, 'id', 'name')}</select></div>
+          <div class="field"><label>Village</label><select id="rf-village"><option value="">Any</option>${opt(VILLAGES_LIST)}</select></div>
+          <div class="field"><label>Age band</label><select id="rf-age"><option value="">Any</option>${opt(AGE_BANDS)}</select></div>
+          <div class="field"><label>Gender</label><select id="rf-gender"><option value="">Any</option><option>Male</option><option>Female</option><option>Other</option></select></div>
+          <div class="field"><label>Pathway</label><select id="rf-route"><option value="">Any</option>
+            <option value="none">Distance only (no glasses)</option><option value="paddle_only">Distance + Paddle</option>
+            <option value="wheel_only">Distance + Wheel</option><option value="wheel_then_paddle">Full workflow</option></select></div>
+          <div class="field"><label>Distance result</label><select id="rf-distance"><option value="">Any</option><option value="pass">Pass</option><option value="fail">Fail</option></select></div>
+          <div class="field"><label>Near result</label><select id="rf-near"><option value="">Any</option><option value="pass">Pass</option><option value="fail">Fail</option></select></div>
+          <div class="field"><label>Paddle power</label><select id="rf-paddle"><option value="">Any</option>${opt(PADDLE_POWERS)}</select></div>
+        </div>
+        <button class="btn btn-primary" style="width:auto;margin-top:6px" onclick="AdminApp.applyResearchFilters()">Apply filters</button>
+      </div>
+      <div id="rf-results"><div class="loading">Choose filters and apply, or apply with no filters for everything (capped at 2000 rows).</div></div>
+    `;
+  }
+
+  const VILLAGES_LIST = ['Port Vila', 'Mele', 'Pango', 'Lelepa', 'Erakor', 'Ifira', 'Eratap', 'Other (camp area)'];
+
   const SCREENS = {
     dashboard: ScreenDashboard,
     devices: ScreenDevices,
     festivals: ScreenFestivals,
-    researchers: placeholder('Researchers', 'Filterable dataset explorer and anonymised export — coming in a follow-up commit on this branch.'),
+    researchers: ScreenResearchers,
     exports: placeholder('Exports', 'CSV / Excel / JSON report generation — coming in a follow-up commit on this branch.'),
     settings: placeholder('Settings', 'Portal preferences — coming in a follow-up commit on this branch.'),
   };
@@ -248,6 +353,6 @@
     go('dashboard');
   }
 
-  window.AdminApp = { go, doSignIn, signOut };
+  window.AdminApp = { go, doSignIn, signOut, applyResearchFilters, exportResearchCsv: downloadResearchCsv };
   document.addEventListener('DOMContentLoaded', boot);
 })();

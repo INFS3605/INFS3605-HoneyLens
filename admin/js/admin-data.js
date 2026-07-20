@@ -65,9 +65,33 @@
     return data || [];
   }
 
+  /**
+   * Filtered, flattened research dataset (v_admin_research_sessions).
+   * filters: { dateFrom, dateTo, festivalId, village, ageBand, gender,
+   *            route, distanceOutcome, nearOutcome, paddlePower }
+   * Any omitted/empty filter is skipped. Capped at 2000 rows per query —
+   * the Researchers page is an explorer/export tool, not a full dump.
+   */
+  async function getResearchSessions(filters = {}) {
+    let q = sb().from('v_admin_research_sessions').select('*');
+    if (filters.dateFrom) q = q.gte('registered_at', filters.dateFrom);
+    if (filters.dateTo) q = q.lte('registered_at', filters.dateTo);
+    if (filters.festivalId) q = q.eq('festival_id', filters.festivalId);
+    if (filters.village) q = q.eq('village', filters.village);
+    if (filters.ageBand) q = q.eq('age_band', filters.ageBand);
+    if (filters.gender) q = q.eq('gender', filters.gender);
+    if (filters.route) q = q.eq('route', filters.route);
+    if (filters.distanceOutcome) q = q.eq('distance_outcome', filters.distanceOutcome);
+    if (filters.nearOutcome) q = q.eq('near_outcome', filters.nearOutcome);
+    if (filters.paddlePower) q = q.eq('paddle_power', filters.paddlePower);
+    const { data, error } = await q.order('registered_at', { ascending: false }).limit(2000);
+    if (error) throw error;
+    return data || [];
+  }
+
   window.AdminData = {
     getKpis, getDailyClients, getDistanceOutcomes, getNearOutcomes,
     getCompletionFunnel, getPathwayFrequencies, getDeviceStatus,
-    getFestivals, getSyncConflicts,
+    getFestivals, getSyncConflicts, getResearchSessions,
   };
 })();
