@@ -65,6 +65,36 @@
     return data || [];
   }
 
+  async function getAgeDistribution() {
+    const { data, error } = await sb().from('v_admin_age_distribution').select('*');
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function getGenderDistribution() {
+    const { data, error } = await sb().from('v_admin_gender_distribution').select('*');
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function getVillageDistribution() {
+    const { data, error } = await sb().from('v_admin_village_distribution').select('*');
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function getLensPowerDistribution() {
+    const { data, error } = await sb().from('v_admin_lens_power_distribution').select('*');
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function getFestivalThroughput() {
+    const { data, error } = await sb().from('v_admin_festival_throughput').select('*');
+    if (error) throw error;
+    return data || [];
+  }
+
   /**
    * Filtered, flattened research dataset (v_admin_research_sessions).
    * filters: { dateFrom, dateTo, festivalId, village, ageBand, gender,
@@ -93,5 +123,7 @@
     getKpis, getDailyClients, getDistanceOutcomes, getNearOutcomes,
     getCompletionFunnel, getPathwayFrequencies, getDeviceStatus,
     getFestivals, getSyncConflicts, getResearchSessions,
+    getAgeDistribution, getGenderDistribution, getVillageDistribution,
+    getLensPowerDistribution, getFestivalThroughput,
   };
 })();

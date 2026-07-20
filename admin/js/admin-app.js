@@ -117,9 +117,11 @@
 
   /* ============================ Dashboard ============================ */
   async function ScreenDashboard() {
-    const [kpis, daily, distanceOut, nearOut, funnel] = await Promise.all([
+    const [kpis, daily, distanceOut, nearOut, funnel, pathways, ageDist, genderDist, villageDist, lensPower, throughput] = await Promise.all([
       AdminData.getKpis(), AdminData.getDailyClients(30), AdminData.getDistanceOutcomes(),
-      AdminData.getNearOutcomes(), AdminData.getCompletionFunnel(),
+      AdminData.getNearOutcomes(), AdminData.getCompletionFunnel(), AdminData.getPathwayFrequencies(),
+      AdminData.getAgeDistribution(), AdminData.getGenderDistribution(), AdminData.getVillageDistribution(),
+      AdminData.getLensPowerDistribution(), AdminData.getFestivalThroughput(),
     ]);
 
     const kpiDefs = [
@@ -164,6 +166,13 @@
       { label: 'Dispense', value: funnel.dispensed },
       { label: 'Completed', value: funnel.completed },
     ];
+    const pathwayLabels = { none: 'Distance only', paddle_only: 'Distance + Paddle', wheel_only: 'Distance + Wheel', wheel_then_paddle: 'Full workflow', incomplete: 'Incomplete' };
+    const pathwayBars = pathways.map((p, i) => ({ label: pathwayLabels[p.route] || p.route, value: p.n, color: AdminCharts.PALETTE[i % AdminCharts.PALETTE.length] }));
+    const ageBars = ageDist.sort((a, b) => a.age_band.localeCompare(b.age_band)).map((r) => ({ label: r.age_band, value: r.n }));
+    const genderSegs = genderDist.map((r, i) => ({ label: r.gender, value: r.n, color: AdminCharts.PALETTE[i % AdminCharts.PALETTE.length] }));
+    const villageBars = villageDist.slice(0, 8).map((r) => ({ label: r.village, value: r.n }));
+    const lensBars = lensPower.map((r) => ({ label: r.power, value: r.n, color: AdminCharts.COLORS.paddle }));
+    const throughputBars = throughput.map((r, i) => ({ label: r.festival_name, value: r.clients, color: AdminCharts.PALETTE[i % AdminCharts.PALETTE.length] }));
 
     $main().innerHTML = `
       <div class="page-head"><div><h1>Dashboard</h1><p>Across every festival, all-time. Filters coming soon.</p></div></div>
@@ -179,6 +188,24 @@
           ${distBars.some(b=>b.value) ? AdminCharts.barChart(distBars, {height:160}) : '<div class="empty">No distance results yet.</div>'}</div>
         <div class="card"><h3>Near vision outcomes</h3><p class="sub">Pass ≥ line 9</p>
           ${nearBars.some(b=>b.value) ? AdminCharts.barChart(nearBars, {height:160}) : '<div class="empty">No near results yet.</div>'}</div>
+      </div>
+      <div class="grid-2">
+        <div class="card"><h3>Clinical pathway frequencies</h3><p class="sub">Which combination of Wheel/Paddle each route needed</p>
+          ${pathwayBars.length ? AdminCharts.barChart(pathwayBars, {height:180}) : '<div class="empty">No completed pre-tests yet.</div>'}</div>
+        <div class="card"><h3>Festival throughput</h3><p class="sub">Clients registered per festival</p>
+          ${throughputBars.length ? AdminCharts.barChart(throughputBars, {height:180}) : '<div class="empty">No festivals yet.</div>'}</div>
+      </div>
+      <div class="grid-3">
+        <div class="card"><h3>Age distribution</h3>
+          ${ageBars.length ? AdminCharts.barChart(ageBars, {height:170, width:340}) : '<div class="empty">No clients yet.</div>'}</div>
+        <div class="card"><h3>Gender distribution</h3>
+          <div style="display:flex;justify-content:center">${genderSegs.length ? AdminCharts.donutChart(genderSegs, {size:150}) : '<div class="empty">No clients yet.</div>'}</div></div>
+        <div class="card"><h3>Lens power distribution</h3><p class="sub">Paddle (reading) power dispensed</p>
+          ${lensBars.length ? AdminCharts.barChart(lensBars, {height:170, width:340}) : '<div class="empty">No paddle dispenses yet.</div>'}</div>
+      </div>
+      <div class="grid-2">
+        <div class="card"><h3>Village distribution</h3><p class="sub">Top 8 villages by client count</p>
+          ${villageBars.length ? AdminCharts.barChart(villageBars, {height:180}) : '<div class="empty">No clients yet.</div>'}</div>
       </div>
     `;
   }
