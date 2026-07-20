@@ -252,15 +252,66 @@
   /* ============================ Festivals (list only for now) ============================ */
   async function ScreenFestivals() {
     const festivals = await AdminData.getFestivals();
-    const rows = festivals.map((f) => `<tr>
+    const rows = festivals.map((f) => `<tr class="clickable-row" onclick="AdminApp.openFestival('${f.id}')">
       <td>${AdminCharts.esc(f.name)}</td><td>${AdminCharts.esc(f.village || '—')}</td>
       <td>${f.start_date} → ${f.end_date}</td><td><span class="chip dim">${f.status}</span></td>
     </tr>`).join('');
     $main().innerHTML = `
-      <div class="page-head"><div><h1>Festivals</h1><p>Per-festival drill-down (throughput, clinical stats, timeline) is coming in a follow-up pass.</p></div></div>
+      <div class="page-head"><div><h1>Festivals</h1><p>Click a festival for its own dashboard — clients, clinical outcomes, and devices scoped to that festival only.</p></div></div>
       <div class="card">
         ${festivals.length ? `<table><thead><tr><th>Name</th><th>Village</th><th>Dates</th><th>Status</th></tr></thead>
           <tbody>${rows}</tbody></table>` : '<div class="empty">No festivals yet.</div>'}
+      </div>
+    `;
+  }
+
+  async function openFestival(festivalId) {
+    state.active = 'festivals';
+    renderShell();
+    $main().innerHTML = '<div class="loading">Loading…</div>';
+    try {
+      const [festivals, sessions, devices] = await Promise.all([
+        AdminData.getFestivals(), AdminData.getResearchSessions({ festivalId }), AdminData.getDeviceStatus(),
+      ]);
+      const f = festivals.find((x) => x.id === festivalId);
+      const fDevices = devices.filter((d) => d.festival_id === festivalId);
+      renderFestivalDetail(f, sessions, fDevices);
+    } catch (e) {
+      console.error('[OOXii Admin] festival detail failed', e);
+      $main().innerHTML = `<div class="placeholder-page"><h2>Could not load this festival</h2><p>${AdminCharts.esc(e.message || 'Unknown error')}</p></div>`;
+    }
+  }
+
+  function renderFestivalDetail(f, sessions, devices) {
+    if (!f) { $main().innerHTML = '<div class="placeholder-page"><h2>Festival not found</h2></div>'; return; }
+    const completed = sessions.filter((s) => s.status === 'Finalised').length;
+    const dispensed = sessions.filter((s) => s.glasses_dispensed).length;
+    const distBars = ['pass', 'fail'].map((k) => ({ label: k === 'pass' ? 'Pass' : 'Fail', value: sessions.filter((s) => s.distance_outcome === k).length, color: k === 'pass' ? AdminCharts.COLORS.green : AdminCharts.COLORS.red }));
+    const nearBars = ['pass', 'fail'].map((k) => ({ label: k === 'pass' ? 'Pass' : 'Fail', value: sessions.filter((s) => s.near_outcome === k).length, color: k === 'pass' ? AdminCharts.COLORS.green : AdminCharts.COLORS.red }));
+    const villageCounts = {}; sessions.forEach((s) => { const v = s.village || 'Unknown'; villageCounts[v] = (villageCounts[v] || 0) + 1; });
+    const villageBars = Object.entries(villageCounts).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([label, value]) => ({ label, value }));
+    const deviceRows = devices.map((d) => `<tr><td>${AdminCharts.esc(d.label || d.id.slice(0, 8))}</td><td>${AdminCharts.esc(d.tester_name || '—')}</td>
+      <td>${fmtDate(d.last_seen_at)}</td><td><span class="chip ${d.status === 'online' ? 'green' : 'amber'}">${d.status}</span></td></tr>`).join('');
+
+    $main().innerHTML = `
+      <div class="page-head">
+        <div><h1>${AdminCharts.esc(f.name)}</h1><p>${AdminCharts.esc(f.village || '—')} · ${f.start_date} → ${f.end_date} · <span class="chip dim">${f.status}</span></p></div>
+        <button class="btn btn-ghost" style="width:auto" onclick="AdminApp.go('festivals')">← All festivals</button>
+      </div>
+      <div class="kpi-grid">
+        <div class="kpi-card"><div class="n">${sessions.length}</div><div class="lbl">Clients tested</div></div>
+        <div class="kpi-card"><div class="n">${completed}</div><div class="lbl">Completed sessions</div></div>
+        <div class="kpi-card"><div class="n">${dispensed}</div><div class="lbl">Glasses dispensed</div></div>
+        <div class="kpi-card"><div class="n">${devices.length}</div><div class="lbl">Devices used</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card"><h3>Distance vision outcomes</h3>${distBars.some((b) => b.value) ? AdminCharts.barChart(distBars, { height: 160 }) : '<div class="empty">No distance results yet.</div>'}</div>
+        <div class="card"><h3>Near vision outcomes</h3>${nearBars.some((b) => b.value) ? AdminCharts.barChart(nearBars, { height: 160 }) : '<div class="empty">No near results yet.</div>'}</div>
+      </div>
+      <div class="grid-2">
+        <div class="card"><h3>Village distribution</h3>${villageBars.length ? AdminCharts.barChart(villageBars, { height: 170 }) : '<div class="empty">No clients yet.</div>'}</div>
+        <div class="card"><h3>Devices at this festival</h3>
+          ${deviceRows ? `<table><thead><tr><th>Device</th><th>Tester</th><th>Last sync</th><th>Status</th></tr></thead><tbody>${deviceRows}</tbody></table>` : '<div class="empty">No devices registered for this festival.</div>'}</div>
       </div>
     `;
   }
@@ -465,6 +516,6 @@
     go('dashboard');
   }
 
-  window.AdminApp = { go, doSignIn, signOut, applyResearchFilters, exportResearchCsv: downloadResearchCsv, doExport };
+  window.AdminApp = { go, doSignIn, signOut, applyResearchFilters, exportResearchCsv: downloadResearchCsv, doExport, openFestival };
   document.addEventListener('DOMContentLoaded', boot);
 })();
