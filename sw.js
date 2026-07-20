@@ -62,7 +62,14 @@
 // 004_handle_identical_stale_events.sql to also be applied to the
 // project — a database change, separate from this cache version. Same
 // controlled, tester-consented activation as every version above.
-const CACHE_VERSION = 'v9';
+//
+// v10: ships js/sync-service.js's fill-null-only merge support
+// (merged_missing_fields status handling) and the 50s periodic reconnect
+// sync retry. Requires supabase/migrations/005_fill_null_only_merge.sql
+// to also be applied to the project — a database change, separate from
+// this cache version. Same controlled, tester-consented activation as
+// every version above — only the version string changed.
+const CACHE_VERSION = 'v10';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
