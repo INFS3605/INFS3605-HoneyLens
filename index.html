@@ -86,6 +86,12 @@
   .pill{display:inline-flex; align-items:center; gap:7px; border:1px solid var(--border-2);
     border-radius:999px; padding:7px 13px; font-size:13px; font-weight:600; color:var(--teal-2)}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+  /* connectivity badge — real navigator.onLine state, distinct from the sync
+     badge (see .sync-pill below). .conn-pill defaults to the "online" look
+     inline (matches the pre-existing .pill/.dot colours); .conn-off is the
+     only state that needs an override. */
+  .conn-pill.conn-off{color:var(--amber)}
+  .conn-pill.conn-off .dot{background:var(--amber);box-shadow:0 0 8px var(--amber)}
   .offline-sub{font-size:13px; color:var(--dim); margin-top:6px}
   .client-sub{font-size:14px; color:var(--dim); margin-top:8px; font-weight:600}
 
@@ -1135,6 +1141,31 @@ function isSafeToReloadNow(){
 }
 window.OOXII_SAFE_TO_RELOAD_NOW = isSafeToReloadNow;
 function pillClass(s){return 's-'+s.toLowerCase().replace(/[^a-z]/g,'');}
+/* ============================ connectivity (real navigator.onLine) ============================ */
+/* This badge answers exactly one question — "does this browser currently
+   have a network connection?" — using the browser's actual signal, never a
+   hard-coded label. It is deliberately NOT the sync badge (see
+   syncStatusPill() near ScreenSync): being online does not mean everything
+   has synced, and being offline does not mean data is unsafe (it's already
+   saved locally the moment it's entered — see .savebanner throughout the
+   clinical screens). Every rendered instance carries the shared
+   `.conn-pill` class so a single online/offline listener can update every
+   copy on the page in place, without a full screen re-render. */
+function connectivityBadge(suffix){
+  const online = navigator.onLine;
+  return `<span class="pill conn-pill ${online?'conn-ok':'conn-off'}"><span class="dot"></span><span class="conn-label">${online?'Online':'Offline'}</span></span>${suffix?` <span class="offline-sub" style="display:inline">${suffix}</span>`:''}`;
+}
+function updateConnectivityBadges(){
+  const online = navigator.onLine;
+  document.querySelectorAll('.conn-pill').forEach(el=>{
+    el.classList.toggle('conn-ok', online);
+    el.classList.toggle('conn-off', !online);
+    const label = el.querySelector('.conn-label');
+    if(label) label.textContent = online ? 'Online' : 'Offline';
+  });
+}
+window.addEventListener('online', updateConnectivityBadges);
+window.addEventListener('offline', updateConnectivityBadges);
 function toast(msg,icon='check'){
   const old=document.querySelector('.toast'); if(old)old.remove();
   const t=document.createElement('div'); t.className='toast';
@@ -1147,7 +1178,7 @@ function header(client){
   return `<div class="topbar">
     <div class="logo"><b>oox</b><span class="dots">ii</span></div>
     <div class="offline-wrap">
-      <span class="pill"><span class="dot"></span>Offline</span>
+      ${connectivityBadge()}
       ${showCtx?`<div class="offline-sub" style="color:var(--teal-2);font-weight:700">You are at: ${activeContextLabel()}</div>`:''}
       ${client?`<div class="client-sub">Client ${client}</div>`:`<div class="offline-sub">Sync later</div>`}
     </div></div>`;
@@ -1476,7 +1507,7 @@ function sidebar(){
       <div class="station-chip ${(st||isIndividualMode())?'':'none'}">${I(isIndividualMode()?'person':(st?stationIcon(st):'warn'),15,(st||isIndividualMode())?'#1cc3d6':'#f5b945')}
         ${isIndividualMode()?'Individual testing':(st?stationLabel(st)+' station':'No station chosen')}</div>
       <button class="side-btn" onclick="go(ScreenFestival)">${I('wheel',16,'#fff')} ${isIndividualMode()?'Festival stations':(st?'Change station':'Choose station')}</button>
-      <div style="margin-top:12px"><span class="pill"><span class="dot"></span>Offline · saved here</span></div>
+      <div style="margin-top:12px">${connectivityBadge()} <span class="offline-sub" style="display:inline">· saved locally</span></div>
       <div class="offline-sub" style="margin-top:8px">Sync queue: ${state.sync.length} waiting</div>
     </div>
     <div class="honey-card">
