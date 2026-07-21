@@ -69,7 +69,22 @@
 // to also be applied to the project — a database change, separate from
 // this cache version. Same controlled, tester-consented activation as
 // every version above — only the version string changed.
-const CACHE_VERSION = 'v10';
+//
+// v11: tester-app stabilisation pass (fix/tester-app-stabilization) — 7
+// fixes: (1) dropdowns silently pre-selecting a real answer instead of a
+// genuine blank placeholder, (2) required fields now marked with an
+// asterisk + inline validation highlight, (3) the hard-coded "Offline"
+// badge replaced with real navigator.onLine state, (4) a persistent,
+// always-reachable sync-status pill + "Sync now" (previously only
+// reachable from a finalised Dispense screen), (5) sync-service.js's
+// pending/failed double-counting corrected, with a new disjoint Syncing
+// bucket, (6) a "Show latest QR" retrieval action (Search Client), no
+// new event/store, and (7) the active festival now shown explicitly and
+// kept in sync when switched, with an unsynced-records warning before
+// switching away from one. No schema/migration change required for any
+// of this. Same controlled, tester-consented activation as every
+// version above.
+const CACHE_VERSION = 'v11';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
