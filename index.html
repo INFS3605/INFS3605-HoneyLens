@@ -1627,10 +1627,10 @@ function ScreenIntake(){
       <div class="readout" style="min-width:auto">${s.id}</div>
     </div>
 
-    ${fieldSelect('person','Age band',null,'in-age',AGE_BANDS,k.ageBand)}
+    ${fieldSelect('person','Age band',null,'in-age',AGE_BANDS,k.ageBand,'Select age group')}
     ${fieldSeg('gender','Gender',null,'in-gender',['Male','Female'],k.gender)}
-    ${fieldSelect('home','Village / Location','From camp list','in-village',VILLAGES,k.village)}
-    ${fieldSelect('eye','Had cataract surgery?',null,'in-cat',['No','Yes, right eye','Yes, left eye','Yes, both eyes','Unsure'],k.cataract)}
+    ${fieldSelect('home','Village / Location','From camp list','in-village',VILLAGES,k.village,'Select location')}
+    ${fieldSelect('eye','Had cataract surgery?',null,'in-cat',['No','Yes, right eye','Yes, left eye','Yes, both eyes','Unsure'],k.cataract,'Select an option')}
     ${fieldSeg('clipboard','Session type',null,'in-type',['Individual','Group'],k.sessionType||'Individual')}
 
     <div class="frow" style="align-items:flex-start">
@@ -1828,7 +1828,7 @@ function eyeBlock(title,p,key,e,instr,markerColor){
       <div class="fctl"><select id="w-${p}-type">${opt(['','Plus','Minus','Neither'],e.lensType,{'':'Select…','Neither':'Neither helps vision'})}</select></div></div>
     <div class="frow" id="w-${p}-sph-wrap" style="display:${(e.lensType==='Plus'||e.lensType==='Minus')?'flex':'none'}"><div class="fic">${I('lens',22)}</div>
       <div class="flabel"><div class="l">Spherical component</div></div>
-      <div class="fctl"><select id="w-${p}-sph">${opt(LENS_POWERS,e.spherePower,{'':'—'})}</select></div></div>
+      <div class="fctl"><select id="w-${p}-sph">${opt(['',...LENS_POWERS],e.spherePower,{'':'Select power'})}</select></div></div>
     <div class="frow"><div class="fic" style="background:linear-gradient(90deg,#d23b4e 50%,#2bb56a 50%)">${I('eye',22)}</div><div class="flabel"><div class="l">Two-colour test</div><div class="h">Which side looks sharper / darker?</div></div>
       <div class="fctl"><select id="w-${p}-colour">${opt(['','Red','Green','Same'],e.colourTestResult,{'':'Select…','Red':'Red side clearer','Green':'Green side clearer','Same':'Look the same'})}</select></div></div>
     <div class="frow"><div class="fic">${I('check',22)}</div><div class="flabel"><div class="l">Can read line 9 or smaller now?</div></div>
@@ -1839,13 +1839,13 @@ function eyeBlock(title,p,key,e,instr,markerColor){
       <div class="fctl"><div class="seg" id="w-${p}-addon">${['Yes','No'].map(o=>`<button data-v="${o}" class="${(o==='Yes')===addonOn?'on':''}">${o}</button>`).join('')}</div></div></div>
     <div class="frow" id="w-${p}-addonpow-wrap" style="display:${addonOn?'flex':'none'}"><div class="fic">${I('lens',22)}</div>
       <div class="flabel"><div class="l">Add-on power</div></div>
-      <div class="fctl"><select id="w-${p}-addonpow">${opt(LENS_POWERS,e.addOnPower,{'':'—'})}</select></div></div>
+      <div class="fctl"><select id="w-${p}-addonpow">${opt(['',...LENS_POWERS],e.addOnPower,{'':'Select power'})}</select></div></div>
     <div class="frow"><div class="fic">${I('wheel',22)}</div><div class="flabel"><div class="l">Toric correction improves vision?</div><div class="h">Optional — only when it helps</div></div>
       <div class="fctl"><div class="seg" id="w-${p}-toric">${['Yes','No'].map(o=>`<button data-v="${o}" class="${(o==='Yes')===toricOn?'on':''}">${o}</button>`).join('')}</div></div></div>
     <div id="w-${p}-toric-wrap" style="display:${toricOn?'block':'none'}">
       ${fieldNumber('wheel','Toric axis (0–180°)',null,'w-'+p+'-toricaxis',e.toricAxis,0,180)}
       <div class="frow"><div class="fic">${I('lens',22)}</div><div class="flabel"><div class="l">Toric power</div></div>
-        <div class="fctl"><select id="w-${p}-toricpow">${opt(LENS_POWERS,e.toricPower,{'':'—'})}</select></div></div>
+        <div class="fctl"><select id="w-${p}-toricpow">${opt(['',...LENS_POWERS],e.toricPower,{'':'Select power'})}</select></div></div>
     </div>`;
 }
 function readEyeForm(p){
@@ -1906,11 +1906,11 @@ function ScreenPaddle(){
 
     <div class="vfield">
       <div class="vhead"><div class="fic">${I('paddle',22)}</div><div class="l">Client's preferred power (if different)</div></div>
-      <div class="vctl"><select id="p-pref" class="full">${opt(PADDLE_POWERS,p.clientPreference,{'':'Same as suggestion / none stated'})}</select></div>
+      <div class="vctl"><select id="p-pref" class="full">${opt(['',...PADDLE_POWERS],p.clientPreference,{'':'Same as suggestion / none stated'})}</select></div>
     </div>
     <div class="vfield">
       <div class="vhead"><div class="fic">${I('check',22)}</div><div class="l">Final selected power (tester confirms)</div></div>
-      <div class="vctl"><select id="p-power" class="full">${opt(PADDLE_POWERS,p.selectedPower,{'':'Choose final power…'})}</select></div>
+      <div class="vctl"><select id="p-power" class="full">${opt(['',...PADDLE_POWERS],p.selectedPower,{'':'Select result'})}</select></div>
     </div>
     <div class="hint">The client's preference always overrides the age suggestion. The final power shown above is what will be dispensed.</div>
 
@@ -1989,8 +1989,8 @@ function ScreenDispense(){
     <div class="hint">Spherical total = sphere + add-on power. Toric power/axis are kept as separate components — the full best-lens combination formula is not in the supplied source and is not fabricated here.</div>`:''}
 
     ${finalised?`<div class="frow"><div class="fic">${I('note',22)}</div><div class="flabel"><div class="l">Frame size / colour</div><div class="h">${d.frameSize||'—'} ${d.frameColour?'· '+d.frameColour:''}</div></div></div>`
-      : `${fieldSelect('note','Frame size (optional)',null,'dp-size',['','Small','Medium','Large'],d.frameSize)}
-         ${fieldSelect('note','Frame colour (optional)',null,'dp-colour',['','Black','Tortoise','Blue','Clear','Other'],d.frameColour)}`}
+      : `${fieldSelect('note','Frame size (optional)',null,'dp-size',['Small','Medium','Large'],d.frameSize,'No preference')}
+         ${fieldSelect('note','Frame colour (optional)',null,'dp-colour',['Black','Tortoise','Blue','Clear','Other'],d.frameColour,'No preference')}`}
 
     <div class="card qrcard" onclick="showHandoverQR('${s.id}')">
       <div class="ic sq" style="background:var(--chip);width:54px;height:54px">${I('qrshow',28)}</div>
@@ -3100,10 +3100,22 @@ function instructionCard(graphic, title, body){
 }
 
 /* ============================ field builders ============================ */
-function fieldSelect(icon,label,help,id,options,val){
+/* `opt()` only ever emits one <option> per entry already IN `options` — it
+   never invents a blank one. Every fieldSelect() caller used to rely on a
+   `{'':'Select…'}` label override that silently did nothing unless the
+   caller ALSO happened to put '' in their own options array (a few did,
+   most didn't) — with no option marked selected, the browser defaults to
+   selecting the FIRST real value, so an untouched dropdown could silently
+   carry a real clinical answer. fieldSelect() now always renders its own
+   disabled placeholder option regardless of what `options` contains, and
+   strips any stray '' the caller still passes so it's never duplicated. */
+function fieldSelect(icon,label,help,id,options,val,placeholder){
+  const ph = placeholder || 'Select an option';
+  const hasVal = val!=null && val!=='';
+  const clean = options.filter(o=>o!=='');
   return `<div class="frow"><div class="fic">${I(icon,22)}</div>
     <div class="flabel"><div class="l">${label}</div>${help?`<div class="h">${help}</div>`:''}</div>
-    <div class="fctl"><select id="${id}">${opt(options,val,{'':'Select…'})}</select></div></div>`;
+    <div class="fctl"><select id="${id}"><option value="" ${hasVal?'':'selected'} disabled>${ph}</option>${opt(clean,val)}</select></div></div>`;
 }
 function fieldSeg(icon,label,help,id,options,val){
   return `<div class="frow"><div class="fic">${I(icon,22)}</div>
