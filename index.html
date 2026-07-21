@@ -317,6 +317,10 @@
     color:#fff;padding:13px 20px;border-radius:12px;font-weight:600;font-size:14px;z-index:60;box-shadow:var(--shadow);
     display:flex;gap:10px;align-items:center;max-width:340px}
   .err{color:var(--red);font-size:13px;margin-top:6px;font-weight:600}
+  .req-mark{color:var(--red);font-weight:800;margin-left:2px}
+  .req-note{font-size:12.5px;color:var(--dim);margin:2px 2px 16px;font-weight:600}
+  .field-invalid select,.field-invalid .seg,.field-invalid input{border:1px solid var(--red) !important;box-shadow:0 0 0 1px var(--red)}
+  .field-invalid-msg{color:var(--red);font-size:12.5px;font-weight:600;margin-top:6px}
 
   /* ===== top navigation ===== */
   .topnav{display:flex;align-items:center;justify-content:space-between;padding:16px 0 18px;
@@ -1148,6 +1152,7 @@ function header(client){
       ${client?`<div class="client-sub">Client ${client}</div>`:`<div class="offline-sub">Sync later</div>`}
     </div></div>`;
 }
+function requiredNote(){ return `<div class="req-note">* Required field</div>`; }
 function privacy(extra){
   return `<div class="privacy">
     <div class="shield">${I('shield',22,'#a7add9')}</div>
@@ -1620,6 +1625,7 @@ function ScreenIntake(){
     ${header(s.id)}
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Works without internet</div><div class="s">Saved on this device</div></div></div>
+    ${requiredNote()}
 
     <div class="card" style="padding:16px;margin-bottom:14px;display:flex;align-items:center;gap:12px">
       <div class="ic sq" style="background:var(--chip)">${I('qr',24)}</div>
@@ -1631,7 +1637,7 @@ function ScreenIntake(){
     ${fieldSeg('gender','Gender',null,'in-gender',['Male','Female'],k.gender)}
     ${fieldSelect('home','Village / Location','From camp list','in-village',VILLAGES,k.village,'Select location')}
     ${fieldSelect('eye','Had cataract surgery?',null,'in-cat',['No','Yes, right eye','Yes, left eye','Yes, both eyes','Unsure'],k.cataract,'Select an option')}
-    ${fieldSeg('clipboard','Session type',null,'in-type',['Individual','Group'],k.sessionType||'Individual')}
+    ${fieldSeg('clipboard','Session type',null,'in-type',['Individual','Group'],k.sessionType||'Individual',false)}
 
     <div class="frow" style="align-items:flex-start">
       <div class="fic">${I('note',22)}</div>
@@ -1656,7 +1662,14 @@ async function saveIntake(){
     ageBand:$('#in-age').value, gender:segVal('in-gender'), village:$('#in-village').value,
     cataract:$('#in-cat').value, sessionType:segVal('in-type'), notes
   };
-  if(!s.intake.ageBand||!s.intake.gender||!s.intake.village||!s.intake.cataract){ toast('Complete all required fields','warn'); return; }
+  if(!s.intake.ageBand||!s.intake.gender||!s.intake.village||!s.intake.cataract){
+    toast('Complete all required fields','warn');
+    if(!s.intake.ageBand) markFieldInvalid('in-age','Select an age group.');
+    if(!s.intake.gender) markFieldInvalid('in-gender','Select a gender.');
+    if(!s.intake.village) markFieldInvalid('in-village','Select a location.');
+    if(!s.intake.cataract) markFieldInvalid('in-cat','Answer this question.');
+    return;
+  }
   s.status='In Progress'; s.path=['Registration','Distance']; s.dir='out'; s.time=nowTime(); s.version++;
   if(!state.queue.includes(s.id)) state.queue.unshift(s.id);
   await recordBackendEvent('Registration', s, 'Registration');
@@ -1687,6 +1700,7 @@ function ScreenDistance(){
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Distance', s)}
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Distance pre-test</div><div class="s">Both eyes tested separately, without glasses</div></div></div>
+    ${requiredNote()}
 
     ${instructionCard(eyeCoverGraphic('L'),'Right eye · no glasses','Ask the person to cover their left eye with the palm of their hand.')}
     ${fieldEyeLine('Smallest line all correct','d-rline',ru.lineReached,'r')}
@@ -1724,7 +1738,11 @@ async function saveDistance(){
   const g=segVal('d-glass');
   const right=chartResult(lineVal('d-rline'), +$('#d-rlet').value||0);
   const left =chartResult(lineVal('d-lline'), +$('#d-llet').value||0);
-  if(!right||!left||!g){ toast('Complete both eyes (lines 0–11) and the glasses question','warn'); return; }
+  if(!right||!left||!g){
+    toast('Complete both eyes (lines 0–11) and the glasses question','warn');
+    if(!g) markFieldInvalid('d-glass','Answer this question.');
+    return;
+  }
   let own=null;
   if(g==='Yes'){
     own=chartResult(lineVal('d-owline'), +$('#d-owlet').value||0);
@@ -1750,6 +1768,7 @@ function ScreenNear(){
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Distance', s)}
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Near pre-test</div><div class="s">Both eyes together, without glasses</div></div></div>
+    ${requiredNote()}
 
     ${instructionCard(bothEyesGraphic(),'Near vision · no glasses','Ask the person to use both eyes to read the near card.')}
     ${fieldEyeLine('Smallest near line all correct','n-line',u.lineReached,'both')}
@@ -1780,7 +1799,11 @@ async function saveNear(){
   const s=state.sessions[state.activeId]; if(!canCompleteStep(s,'Near')){ backToBase(); return; }
   const g=segVal('n-glass');
   const unaided=chartResult(lineVal('n-line'), +$('#n-let').value||0);
-  if(!unaided||!g){ toast('Complete the near line (0–11) and the glasses question','warn'); return; }
+  if(!unaided||!g){
+    toast('Complete the near line (0–11) and the glasses question','warn');
+    if(!g) markFieldInvalid('n-glass','Answer this question.');
+    return;
+  }
   let own=null;
   if(g==='Yes'){
     own=chartResult(lineVal('n-owline'), +$('#n-owlet').value||0);
@@ -1804,6 +1827,7 @@ function ScreenWheel(){
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Wheel', s)}
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Wheel test · to improve distance vision</div><div class="s">Saved on this device</div></div></div>
+    ${requiredNote()}
 
     ${fieldNumber('wheel','Pupillary distance (PD)','Valid range 52–78','w-pd',w.pd,52,78)}
 
@@ -1824,23 +1848,23 @@ function eyeBlock(title,p,key,e,instr,markerColor){
   return `<div class="sec" style="margin:22px 2px 10px"><h2 style="font-size:18px">
     <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${markerColor};margin-right:8px;vertical-align:middle;border:1px solid rgba(0,0,0,.2)"></span>${title}</h2></div>
     ${instructionCard(eyeCoverGraphic(p==='r'?'L':'R'), 'Cover the other eye', instr)}
-    <div class="frow"><div class="fic">${I('wheel',22)}</div><div class="flabel"><div class="l">Best lens is</div></div>
-      <div class="fctl"><select id="w-${p}-type">${opt(['','Plus','Minus','Neither'],e.lensType,{'':'Select…','Neither':'Neither helps vision'})}</select></div></div>
+    <div class="frow" id="w-${p}-type-row"><div class="fic">${I('wheel',22)}</div><div class="flabel"><div class="l">Best lens is <span class="req-mark" aria-hidden="true">*</span></div></div>
+      <div class="fctl"><select id="w-${p}-type" required aria-required="true">${opt(['','Plus','Minus','Neither'],e.lensType,{'':'Select…','Neither':'Neither helps vision'})}</select></div></div>
     <div class="frow" id="w-${p}-sph-wrap" style="display:${(e.lensType==='Plus'||e.lensType==='Minus')?'flex':'none'}"><div class="fic">${I('lens',22)}</div>
-      <div class="flabel"><div class="l">Spherical component</div></div>
-      <div class="fctl"><select id="w-${p}-sph">${opt(['',...LENS_POWERS],e.spherePower,{'':'Select power'})}</select></div></div>
-    <div class="frow"><div class="fic" style="background:linear-gradient(90deg,#d23b4e 50%,#2bb56a 50%)">${I('eye',22)}</div><div class="flabel"><div class="l">Two-colour test</div><div class="h">Which side looks sharper / darker?</div></div>
-      <div class="fctl"><select id="w-${p}-colour">${opt(['','Red','Green','Same'],e.colourTestResult,{'':'Select…','Red':'Red side clearer','Green':'Green side clearer','Same':'Look the same'})}</select></div></div>
-    <div class="frow"><div class="fic">${I('check',22)}</div><div class="flabel"><div class="l">Can read line 9 or smaller now?</div></div>
-      <div class="fctl"><div class="seg" id="w-${p}-read9">${['Yes','No'].map(o=>`<button data-v="${o}" class="${e.canReadLine9OrSmaller===(o==='Yes')?'on':''}">${o}</button>`).join('')}</div></div></div>
-    <div class="frow"><div class="fic">${I('glasses',22)}</div><div class="flabel"><div class="l">Vision improved at the Wheel?</div></div>
-      <div class="fctl"><div class="seg" id="w-${p}-improved">${['Yes','No'].map(o=>`<button data-v="${o}" class="${e.visionImproved===(o==='Yes')?'on':''}">${o}</button>`).join('')}</div></div></div>
-    <div class="frow"><div class="fic">${I('lens',22)}</div><div class="flabel"><div class="l">Add-on lens needed?</div><div class="h">Only when the prescription exceeds the wheel's range</div></div>
-      <div class="fctl"><div class="seg" id="w-${p}-addon">${['Yes','No'].map(o=>`<button data-v="${o}" class="${(o==='Yes')===addonOn?'on':''}">${o}</button>`).join('')}</div></div></div>
+      <div class="flabel"><div class="l">Spherical component <span class="req-mark" aria-hidden="true">*</span></div></div>
+      <div class="fctl"><select id="w-${p}-sph" required aria-required="true">${opt(['',...LENS_POWERS],e.spherePower,{'':'Select power'})}</select></div></div>
+    <div class="frow" id="w-${p}-colour-row"><div class="fic" style="background:linear-gradient(90deg,#d23b4e 50%,#2bb56a 50%)">${I('eye',22)}</div><div class="flabel"><div class="l">Two-colour test <span class="req-mark" aria-hidden="true">*</span></div><div class="h">Which side looks sharper / darker?</div></div>
+      <div class="fctl"><select id="w-${p}-colour" required aria-required="true">${opt(['','Red','Green','Same'],e.colourTestResult,{'':'Select…','Red':'Red side clearer','Green':'Green side clearer','Same':'Look the same'})}</select></div></div>
+    <div class="frow" id="w-${p}-read9-row"><div class="fic">${I('check',22)}</div><div class="flabel"><div class="l">Can read line 9 or smaller now? <span class="req-mark" aria-hidden="true">*</span></div></div>
+      <div class="fctl"><div class="seg" id="w-${p}-read9" role="group" aria-required="true">${['Yes','No'].map(o=>`<button data-v="${o}" class="${e.canReadLine9OrSmaller===(o==='Yes')?'on':''}">${o}</button>`).join('')}</div></div></div>
+    <div class="frow" id="w-${p}-improved-row"><div class="fic">${I('glasses',22)}</div><div class="flabel"><div class="l">Vision improved at the Wheel? <span class="req-mark" aria-hidden="true">*</span></div></div>
+      <div class="fctl"><div class="seg" id="w-${p}-improved" role="group" aria-required="true">${['Yes','No'].map(o=>`<button data-v="${o}" class="${e.visionImproved===(o==='Yes')?'on':''}">${o}</button>`).join('')}</div></div></div>
+    <div class="frow" id="w-${p}-addon-row"><div class="fic">${I('lens',22)}</div><div class="flabel"><div class="l">Add-on lens needed? <span class="req-mark" aria-hidden="true">*</span></div><div class="h">Only when the prescription exceeds the wheel's range</div></div>
+      <div class="fctl"><div class="seg" id="w-${p}-addon" role="group" aria-required="true">${['Yes','No'].map(o=>`<button data-v="${o}" class="${(o==='Yes')===addonOn?'on':''}">${o}</button>`).join('')}</div></div></div>
     <div class="frow" id="w-${p}-addonpow-wrap" style="display:${addonOn?'flex':'none'}"><div class="fic">${I('lens',22)}</div>
-      <div class="flabel"><div class="l">Add-on power</div></div>
-      <div class="fctl"><select id="w-${p}-addonpow">${opt(['',...LENS_POWERS],e.addOnPower,{'':'Select power'})}</select></div></div>
-    <div class="frow"><div class="fic">${I('wheel',22)}</div><div class="flabel"><div class="l">Toric correction improves vision?</div><div class="h">Optional — only when it helps</div></div>
+      <div class="flabel"><div class="l">Add-on power <span class="req-mark" aria-hidden="true">*</span></div></div>
+      <div class="fctl"><select id="w-${p}-addonpow" required aria-required="true">${opt(['',...LENS_POWERS],e.addOnPower,{'':'Select power'})}</select></div></div>
+    <div class="frow" id="w-${p}-toric-row"><div class="fic">${I('wheel',22)}</div><div class="flabel"><div class="l">Toric correction improves vision?</div><div class="h">Optional — only when it helps</div></div>
       <div class="fctl"><div class="seg" id="w-${p}-toric">${['Yes','No'].map(o=>`<button data-v="${o}" class="${(o==='Yes')===toricOn?'on':''}">${o}</button>`).join('')}</div></div></div>
     <div id="w-${p}-toric-wrap" style="display:${toricOn?'block':'none'}">
       ${fieldNumber('wheel','Toric axis (0–180°)',null,'w-'+p+'-toricaxis',e.toricAxis,0,180)}
@@ -1853,13 +1877,18 @@ function readEyeForm(p){
   const colourTestResult=$('#w-'+p+'-colour').value;
   const read9=segVal('w-'+p+'-read9'), improved=segVal('w-'+p+'-improved');
   const addonV=segVal('w-'+p+'-addon'), toricV=segVal('w-'+p+'-toric');
-  if(!lensType || !colourTestResult || !read9 || !improved || !addonV || !toricV) return {error:'Complete every field for this eye'};
-  if((lensType==='Plus'||lensType==='Minus') && !$('#w-'+p+'-sph').value) return {error:'Select the spherical component'};
+  if(!lensType) return {error:'Complete every field for this eye', field:'type'};
+  if(!colourTestResult) return {error:'Complete every field for this eye', field:'colour'};
+  if(!read9) return {error:'Complete every field for this eye', field:'read9'};
+  if(!improved) return {error:'Complete every field for this eye', field:'improved'};
+  if(!addonV) return {error:'Complete every field for this eye', field:'addon'};
+  if(!toricV) return {error:'Complete every field for this eye', field:'toric'};
+  if((lensType==='Plus'||lensType==='Minus') && !$('#w-'+p+'-sph').value) return {error:'Select the spherical component', field:'sph-wrap'};
   const addOnUsed=addonV==='Yes';
-  if(addOnUsed && !$('#w-'+p+'-addonpow').value) return {error:'Select the add-on power'};
+  if(addOnUsed && !$('#w-'+p+'-addonpow').value) return {error:'Select the add-on power', field:'addonpow-wrap'};
   const toricUsed=toricV==='Yes';
   const toricAxis=toricUsed?+$('#w-'+p+'-toricaxis').value:null;
-  if(toricUsed && (!$('#w-'+p+'-toricpow').value || !Number.isInteger(toricAxis) || toricAxis<0 || toricAxis>180)) return {error:'Toric power and axis (0–180°) are required'};
+  if(toricUsed && (!$('#w-'+p+'-toricpow').value || !Number.isInteger(toricAxis) || toricAxis<0 || toricAxis>180)) return {error:'Toric power and axis (0–180°) are required', field:'toric-wrap'};
   const eye={
     lensType, spherePower:(lensType==='Plus'||lensType==='Minus')?$('#w-'+p+'-sph').value:null,
     addOnUsed, addOnPower:addOnUsed?$('#w-'+p+'-addonpow').value:null,
@@ -1875,8 +1904,8 @@ async function saveWheel(){
   const pd=+$('#w-pd').value;
   if(!(pd>=52&&pd<=78)){ toast('PD must be between 52 and 78','warn'); return; }
   const r=readEyeForm('r'), l=readEyeForm('l');
-  if(r.error){ toast('Right eye: '+r.error,'warn'); return; }
-  if(l.error){ toast('Left eye: '+l.error,'warn'); return; }
+  if(r.error){ toast('Right eye: '+r.error,'warn'); if(r.field) markFieldInvalid('w-r-'+r.field,r.error); return; }
+  if(l.error){ toast('Left eye: '+l.error,'warn'); if(l.field) markFieldInvalid('w-l-'+l.field,l.error); return; }
   s.wheel={ pd, right:r.eye, left:l.eye, testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime() };
   s.version++; s._stepLabel='Wheel test done'; await recordBackendEvent('Wheel', s, 'Wheel'); advance(s);
 }
@@ -1896,6 +1925,7 @@ function ScreenPaddle(){
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Paddle', s)}
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Paddle test · preferred reading power</div><div class="s">Required because Near vision failed</div></div></div>
+    ${requiredNote()}
 
     ${instructionCard(nearPaddleGraphic(),'Find the preferred reading power','While looking through the wheel lenses (if used) at the near vision chart, use the paddle to find the reading power the client prefers.')}
 
@@ -1908,9 +1938,9 @@ function ScreenPaddle(){
       <div class="vhead"><div class="fic">${I('paddle',22)}</div><div class="l">Client's preferred power (if different)</div></div>
       <div class="vctl"><select id="p-pref" class="full">${opt(['',...PADDLE_POWERS],p.clientPreference,{'':'Same as suggestion / none stated'})}</select></div>
     </div>
-    <div class="vfield">
-      <div class="vhead"><div class="fic">${I('check',22)}</div><div class="l">Final selected power (tester confirms)</div></div>
-      <div class="vctl"><select id="p-power" class="full">${opt(['',...PADDLE_POWERS],p.selectedPower,{'':'Select result'})}</select></div>
+    <div class="vfield" id="p-power-row">
+      <div class="vhead"><div class="fic">${I('check',22)}</div><div class="l">Final selected power (tester confirms) <span class="req-mark" aria-hidden="true">*</span></div></div>
+      <div class="vctl"><select id="p-power" class="full" required aria-required="true">${opt(['',...PADDLE_POWERS],p.selectedPower,{'':'Select result'})}</select></div>
     </div>
     <div class="hint">The client's preference always overrides the age suggestion. The final power shown above is what will be dispensed.</div>
 
@@ -1924,7 +1954,7 @@ function ScreenPaddle(){
 async function savePaddle(){
   const s=state.sessions[state.activeId]; if(!canCompleteStep(s,'Paddle')){ backToBase(); return; }
   const selectedPower=$('#p-power').value, clientPreference=$('#p-pref').value||null;
-  if(!selectedPower){ toast('Confirm the final selected reading power','warn'); return; }
+  if(!selectedPower){ toast('Confirm the final selected reading power','warn'); markFieldInvalid('p-power','Select the final power.'); return; }
   const ageBand=(s.intake||{}).ageBand, sug=suggestPaddlePower(ageBand);
   s.paddle={
     ageBand, suggestedPower:sug.power, suggestionNote:sug.note,
@@ -1989,8 +2019,8 @@ function ScreenDispense(){
     <div class="hint">Spherical total = sphere + add-on power. Toric power/axis are kept as separate components — the full best-lens combination formula is not in the supplied source and is not fabricated here.</div>`:''}
 
     ${finalised?`<div class="frow"><div class="fic">${I('note',22)}</div><div class="flabel"><div class="l">Frame size / colour</div><div class="h">${d.frameSize||'—'} ${d.frameColour?'· '+d.frameColour:''}</div></div></div>`
-      : `${fieldSelect('note','Frame size (optional)',null,'dp-size',['Small','Medium','Large'],d.frameSize,'No preference')}
-         ${fieldSelect('note','Frame colour (optional)',null,'dp-colour',['Black','Tortoise','Blue','Clear','Other'],d.frameColour,'No preference')}`}
+      : `${fieldSelect('note','Frame size (optional)',null,'dp-size',['Small','Medium','Large'],d.frameSize,'No preference',false)}
+         ${fieldSelect('note','Frame colour (optional)',null,'dp-colour',['Black','Tortoise','Blue','Clear','Other'],d.frameColour,'No preference',false)}`}
 
     <div class="card qrcard" onclick="showHandoverQR('${s.id}')">
       <div class="ic sq" style="background:var(--chip);width:54px;height:54px">${I('qrshow',28)}</div>
@@ -3109,23 +3139,49 @@ function instructionCard(graphic, title, body){
    carry a real clinical answer. fieldSelect() now always renders its own
    disabled placeholder option regardless of what `options` contains, and
    strips any stray '' the caller still passes so it's never duplicated. */
-function fieldSelect(icon,label,help,id,options,val,placeholder){
+/* required=true by default (most clinical fields are); pass false explicitly
+   for genuinely optional fields (frame size/colour, paddle's stated
+   preference) — never the other way round. The asterisk is never the only
+   indicator: the field also carries a real `required`/`aria-required`
+   attribute, and saveXxx()'s existing validation is what actually blocks
+   the save (see markFieldInvalid()). */
+function fieldSelect(icon,label,help,id,options,val,placeholder,required=true){
   const ph = placeholder || 'Select an option';
   const hasVal = val!=null && val!=='';
   const clean = options.filter(o=>o!=='');
-  return `<div class="frow"><div class="fic">${I(icon,22)}</div>
-    <div class="flabel"><div class="l">${label}</div>${help?`<div class="h">${help}</div>`:''}</div>
-    <div class="fctl"><select id="${id}"><option value="" ${hasVal?'':'selected'} disabled>${ph}</option>${opt(clean,val)}</select></div></div>`;
+  return `<div class="frow" id="${id}-row"><div class="fic">${I(icon,22)}</div>
+    <div class="flabel"><div class="l">${label}${required?' <span class="req-mark" aria-hidden="true">*</span>':''}</div>${help?`<div class="h">${help}</div>`:''}</div>
+    <div class="fctl"><select id="${id}" ${required?'required aria-required="true"':''}><option value="" ${hasVal?'':'selected'} disabled>${ph}</option>${opt(clean,val)}</select></div></div>`;
 }
-function fieldSeg(icon,label,help,id,options,val){
-  return `<div class="frow"><div class="fic">${I(icon,22)}</div>
-    <div class="flabel"><div class="l">${label}</div>${help?`<div class="h">${help}</div>`:''}</div>
-    <div class="fctl"><div class="seg" id="${id}">${options.map(o=>`<button data-v="${o}" class="${val===o?'on':''}">${o}</button>`).join('')}</div></div></div>`;
+function fieldSeg(icon,label,help,id,options,val,required=true){
+  return `<div class="frow" id="${id}-row"><div class="fic">${I(icon,22)}</div>
+    <div class="flabel"><div class="l">${label}${required?' <span class="req-mark" aria-hidden="true">*</span>':''}</div>${help?`<div class="h">${help}</div>`:''}</div>
+    <div class="fctl"><div class="seg" id="${id}" role="group" ${required?'aria-required="true"':''}>${options.map(o=>`<button data-v="${o}" class="${val===o?'on':''}">${o}</button>`).join('')}</div></div></div>`;
 }
-function fieldNumber(icon,label,help,id,val,min,max){
-  return `<div class="frow"><div class="fic">${I(icon,22)}</div>
-    <div class="flabel"><div class="l">${label}</div>${help?`<div class="h">${help}</div>`:''}</div>
-    <div class="fctl"><input id="${id}" type="number" min="${min}" max="${max}" value="${val||''}" style="width:96px;text-align:center"></div></div>`;
+/* Highlights the given field row (by the id passed to fieldSelect/fieldSeg/
+   fieldNumber) with a red outline + inline message — the toast already
+   names what's missing; this points at exactly which control it is.
+   Clears itself the next time that control is used. */
+/* Looks for `${id}-row` first (fieldSelect/fieldSeg/fieldNumber's own
+   wrapper), falling back to a plain `${id}` element — a few hand-built
+   conditional wrappers (e.g. the Wheel's *-wrap show/hide containers) are
+   already addressable by that exact id and must not be renamed, since
+   other code toggles their visibility by it. */
+function markFieldInvalid(id, msg){
+  const row = document.getElementById(id+'-row') || document.getElementById(id);
+  if(!row) return;
+  row.classList.add('field-invalid');
+  let m = row.querySelector('.field-invalid-msg');
+  if(!m){ m = document.createElement('div'); m.className='field-invalid-msg'; (row.querySelector('.flabel, .vhead')||row).appendChild(m); }
+  m.textContent = msg || 'This field is required.';
+  const clear = ()=>{ row.classList.remove('field-invalid'); if(m) m.remove(); };
+  const ctl = row.querySelector('select, .seg, input');
+  if(ctl) ctl.addEventListener(ctl.tagName==='SELECT'||ctl.tagName==='INPUT'?'change':'click', clear, {once:true});
+}
+function fieldNumber(icon,label,help,id,val,min,max,required=true){
+  return `<div class="frow" id="${id}-row"><div class="fic">${I(icon,22)}</div>
+    <div class="flabel"><div class="l">${label}${required?' <span class="req-mark" aria-hidden="true">*</span>':''}</div>${help?`<div class="h">${help}</div>`:''}</div>
+    <div class="fctl"><input id="${id}" type="number" min="${min}" max="${max}" value="${val||''}" style="width:96px;text-align:center" ${required?'required aria-required="true"':''}></div></div>`;
 }
 /* stacked: chart glyph + label on top, full-width line dropdown below, eye colour-coded.
    Chart lines 0 (top, largest) to 11 (bottom, smallest) per the authoritative table. */
