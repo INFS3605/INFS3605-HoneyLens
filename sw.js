@@ -69,7 +69,15 @@
 // to also be applied to the project — a database change, separate from
 // this cache version. Same controlled, tester-consented activation as
 // every version above — only the version string changed.
-const CACHE_VERSION = 'v10';
+//
+// v11: tester-app stabilisation pass (fix/tester-app-stabilization) —
+// fixes dropdowns silently pre-selecting a real answer, marks required
+// fields, replaces the hard-coded "Offline" badge with real
+// navigator.onLine state, and corrects sync-service.js's pending/failed
+// double-counting (adds a disjoint Syncing bucket). No schema/migration
+// change required for this version. Same controlled, tester-consented
+// activation as every version above.
+const CACHE_VERSION = 'v11';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 

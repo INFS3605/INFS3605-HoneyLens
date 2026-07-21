@@ -2104,10 +2104,17 @@ function ScreenSync(){
   </div>`;
   window.OOXII_SYNC.getSyncStatus().then(renderSyncStatus);
 }
+/* Each row is a DISJOINT bucket — every locally queued event falls into
+   exactly one, never more than one (see getSyncStatus() in
+   js/sync-service.js for the exact definitions). Previously "Pending"
+   double-counted every retry-needed event (it was pendingEvents.length,
+   which already included them), so a single stuck event could show as
+   both "Pending: 1" and "Failed (retrying): 1" at once. */
 function renderSyncStatus(status){
   const rows=[
     ['Pending', status.pendingCount, 's-waiting', '#f5b945'],
-    ['Failed (retrying)', status.failedCount, 's-error', '#f06a7a'],
+    ['Syncing now', status.syncingCount, 's-ready', '#1cc3d6'],
+    ['Retry needed', status.retryCount, 's-error', '#f06a7a'],
     ['Conflicts needing review', status.conflictedCount, 's-blocked', '#f06a7a'],
   ];
   screenEl().innerHTML=`<div class="pad pb">
