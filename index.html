@@ -92,6 +92,20 @@
      only state that needs an override. */
   .conn-pill.conn-off{color:var(--amber)}
   .conn-pill.conn-off .dot{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+  /* sync badge — a SEPARATE concept from connectivity (see .conn-pill
+     above): whether this device's local records have all reached
+     Supabase, not whether the browser currently has a network
+     connection. Always clickable through to the Sync queue screen. */
+  .sync-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border-2);
+    border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:600;cursor:pointer;
+    background:none;color:var(--dim)}
+  .sync-pill .dot{width:7px;height:7px;background:var(--dim);box-shadow:none}
+  .sync-pill.sy-synced{color:var(--green)}
+  .sync-pill.sy-synced .dot{background:var(--green);box-shadow:0 0 6px var(--green)}
+  .sync-pill.sy-pending{color:var(--teal-2)}
+  .sync-pill.sy-pending .dot{background:var(--teal-2);box-shadow:0 0 6px var(--teal-2)}
+  .sync-pill.sy-error{color:var(--red)}
+  .sync-pill.sy-error .dot{background:var(--red);box-shadow:0 0 6px var(--red)}
   .offline-sub{font-size:13px; color:var(--dim); margin-top:6px}
   .client-sub{font-size:14px; color:var(--dim); margin-top:8px; font-weight:600}
 
@@ -1126,7 +1140,7 @@ function I(name,size=24,stroke='#fff'){
 /* ============================ tiny helpers ============================ */
 const $ = sel => document.getElementById('screen').querySelector(sel);
 const screenEl = ()=>document.getElementById('screen');
-function go(fn){ state._currentScreenFn=fn; screenEl().scrollTop=0; fn(); }
+function go(fn){ state._currentScreenFn=fn; screenEl().scrollTop=0; fn(); refreshSyncStatusCache(); }
 /* Read by js/sw-register.js (a separate file — window is how it reaches
    this) before actually acting on a "Reload and update" press, so a
    service-worker update can never silently discard a client's unsaved
@@ -1166,6 +1180,43 @@ function updateConnectivityBadges(){
 }
 window.addEventListener('online', updateConnectivityBadges);
 window.addEventListener('offline', updateConnectivityBadges);
+window.addEventListener('online', ()=>refreshSyncStatusCache());
+
+/* ============================ sync status pill (persistent, non-blocking) ============================ */
+/* A SEPARATE concept from the connectivity badge above: whether this
+   device's locally queued records have all reached Supabase, not whether
+   the browser currently has a network connection. Reachable from every
+   screen (header() + sidebar()) rather than only after finishing a whole
+   client workflow — previously the only way to see sync status at all was
+   the "Save for sync later" button on a finalised Dispense screen. Renders
+   synchronously from a cache (same pattern as getCachedHoneyDisplayTotalsSync/
+   refreshHoneyDisplayCache in js/backend-adapter.js) and refreshes in the
+   background on every screen navigation (see go()) and connectivity change,
+   patching every `.sync-pill` already in the DOM in place — no full
+   re-render, no blocking modal. */
+let cachedSyncStatus = null;
+function refreshSyncStatusCache(){
+  if(!window.OOXII_SYNC || !window.OOXII_CONFIG_VALID || isDemoModeSession()) return;
+  window.OOXII_SYNC.getSyncStatus().then((s)=>{ cachedSyncStatus=s; updateSyncPills(); }).catch(()=>{});
+}
+function syncPillContent(){
+  if(!window.OOXII_CONFIG_VALID || isDemoModeSession()){
+    return { label: state.sync.length ? state.sync.length+' queued' : 'Sync', cls: 'sy-offline' };
+  }
+  const s = cachedSyncStatus;
+  if(!s) return { label: 'Sync', cls: 'sy-offline' };
+  if(s.conflictedCount>0) return { label: s.conflictedCount+' conflict'+(s.conflictedCount===1?'':'s'), cls: 'sy-error' };
+  if(s.syncingCount>0) return { label: 'Syncing…', cls: 'sy-pending' };
+  if(s.pendingCount>0 || s.retryCount>0) return { label: (s.pendingCount+s.retryCount)+' pending', cls: 'sy-pending' };
+  return { label: 'Synced', cls: 'sy-synced' };
+}
+function syncStatusPill(){
+  const {label,cls} = syncPillContent();
+  return `<span class="sync-pill ${cls}" onclick="go(ScreenSync)" role="button" tabindex="0" onkeydown="if(event.key==='Enter')go(ScreenSync)"><span class="dot"></span>${label}</span>`;
+}
+function updateSyncPills(){
+  document.querySelectorAll('.sync-pill').forEach((el)=>{ el.outerHTML = syncStatusPill(); });
+}
 function toast(msg,icon='check'){
   const old=document.querySelector('.toast'); if(old)old.remove();
   const t=document.createElement('div'); t.className='toast';
@@ -1178,9 +1229,9 @@ function header(client){
   return `<div class="topbar">
     <div class="logo"><b>oox</b><span class="dots">ii</span></div>
     <div class="offline-wrap">
-      ${connectivityBadge()}
+      <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end">${connectivityBadge()}${syncStatusPill()}</div>
       ${showCtx?`<div class="offline-sub" style="color:var(--teal-2);font-weight:700">You are at: ${activeContextLabel()}</div>`:''}
-      ${client?`<div class="client-sub">Client ${client}</div>`:`<div class="offline-sub">Sync later</div>`}
+      ${client?`<div class="client-sub">Client ${client}</div>`:''}
     </div></div>`;
 }
 function requiredNote(){ return `<div class="req-note">* Required field</div>`; }
@@ -1507,8 +1558,7 @@ function sidebar(){
       <div class="station-chip ${(st||isIndividualMode())?'':'none'}">${I(isIndividualMode()?'person':(st?stationIcon(st):'warn'),15,(st||isIndividualMode())?'#1cc3d6':'#f5b945')}
         ${isIndividualMode()?'Individual testing':(st?stationLabel(st)+' station':'No station chosen')}</div>
       <button class="side-btn" onclick="go(ScreenFestival)">${I('wheel',16,'#fff')} ${isIndividualMode()?'Festival stations':(st?'Change station':'Choose station')}</button>
-      <div style="margin-top:12px">${connectivityBadge()} <span class="offline-sub" style="display:inline">· saved locally</span></div>
-      <div class="offline-sub" style="margin-top:8px">Sync queue: ${state.sync.length} waiting</div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${connectivityBadge()}${syncStatusPill()}</div>
     </div>
     <div class="honey-card">
       <div style="display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px">
@@ -2102,7 +2152,7 @@ function ScreenSync(){
     ${navBar('home')}
     <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync queue</h1><p>Checking pending records…</p></div></div>
   </div>`;
-  window.OOXII_SYNC.getSyncStatus().then(renderSyncStatus);
+  window.OOXII_SYNC.getSyncStatus().then((s)=>{ cachedSyncStatus=s; updateSyncPills(); renderSyncStatus(s); });
 }
 /* Each row is a DISJOINT bucket — every locally queued event falls into
    exactly one, never more than one (see getSyncStatus() in
@@ -2128,14 +2178,27 @@ function renderSyncStatus(status){
         <div class="val"><span class="statpill ${cls}"><span class="dot" style="background:${dot}"></span>${n}</span></div></div>`).join('')}
     </div>
     ${status.conflictedCount?`<div class="hint">Conflicts are never auto-resolved — a coordinator reviews them in Supabase (sync_conflicts table).</div>`:''}
-    <button class="btn btn-primary" style="margin-top:14px" onclick="manualSyncNow()">${I('cloud',22)} Sync now</button>
+    ${(()=>{
+      const hasWork = status.pendingCount>0 || status.retryCount>0;
+      const disabled = !navigator.onLine || !hasWork || status.syncingCount>0;
+      const label = status.syncingCount>0 ? 'Syncing…' : (!navigator.onLine ? 'Offline — cannot sync now' : (!hasWork ? 'Nothing to sync' : 'Sync now'));
+      return `<button class="btn btn-primary" style="margin-top:14px" ${disabled?'disabled':''} onclick="manualSyncNow()">${I('cloud',22)} ${label}</button>`;
+    })()}
     ${privacy()}
   </div>`;
 }
+let manualSyncInFlight=false;
 async function manualSyncNow(){
   if(!navigator.onLine){ toast('No internet connection right now','warn'); return; }
+  if(manualSyncInFlight) return; // the button already reflects "Syncing…"/disabled, but guard against a stale click queued just before re-render
+  manualSyncInFlight=true;
   toast('Syncing…','cloud');
-  const r=await window.OOXII_SYNC.syncNow();
+  let r;
+  try{
+    r=await window.OOXII_SYNC.syncNow();
+  } finally {
+    manualSyncInFlight=false;
+  }
   if(r.ok){ toast(r.pushed+' record'+(r.pushed===1?'':'s')+' synced'); }
   else if(r.reason==='session_expired'){ toast('Your session expired — sign in online again','warn'); }
   else if(r.reason==='already_running_elsewhere'){ toast('Sync is already running in another OOXii tab.','warn'); }
