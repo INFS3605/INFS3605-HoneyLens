@@ -892,12 +892,43 @@ function isStationAllowed(key){
 }
 /* switching festivals clears the active station — a station assignment is
    always scoped to one festival, never carried over to another. */
+/* Warn before switching if THIS device has unsynced records for the
+   festival being left — never silently reassign or lose sight of them
+   (they keep their original festival_id regardless; this is purely a
+   "are you sure" prompt, mirroring doLogout()'s existing unsynced-records
+   modal). Explicit confirmation required only when there's real unsynced
+   work at stake; switching festivals when fully synced (or in demo mode,
+   with no IndexedDB-backed queue at all) proceeds immediately. */
 async function switchActiveFestival(festivalId){
+  const ctx = window.OOXII_BACKEND.getCachedContext();
+  if(!ctx || festivalId===ctx.activeFestivalId) return;
+  let unsyncedForCurrent = 0;
+  if(window.OOXII_DB){
+    try{
+      const pending = await window.OOXII_DB.pendingEvents.all();
+      unsyncedForCurrent = pending.filter(e=>e.festivalId===ctx.activeFestivalId).length;
+    }catch(e){ /* can't check — proceed as if none, rather than block on an unrelated storage error */ }
+  }
+  if(unsyncedForCurrent>0){
+    const currentLabel = (ctx.festivals.find(f=>f.festivalId===ctx.activeFestivalId)||{}).festivalName || 'your current festival';
+    scrim(`<div class="modal">
+      <div class="ic sq" style="background:rgba(245,185,69,.14);border:1px solid rgba(245,185,69,.4);width:60px;height:60px;margin:0 auto 12px">${I('warn',28,'#f5b945')}</div>
+      <h3>Unsynced records</h3>
+      <p>${unsyncedForCurrent} record${unsyncedForCurrent===1?'':'s'} for <b style="color:#fff">${currentLabel}</b> ${unsyncedForCurrent===1?'has':'have'} not synced from this device yet. They stay safe and keep their festival — switching just changes what you register NEXT.</p>
+      <button class="btn btn-primary" onclick="closeScrim();reallySwitchActiveFestival('${festivalId}')">Switch anyway</button>
+      <button class="btn btn-secondary" onclick="closeScrim()">Stay on ${currentLabel}</button>
+    </div>`);
+    return;
+  }
+  await reallySwitchActiveFestival(festivalId);
+}
+async function reallySwitchActiveFestival(festivalId){
   const ctx = window.OOXII_BACKEND.getCachedContext();
   if(!ctx) return;
   ctx.activeFestivalId = festivalId;
   window.OOXII_BACKEND.refreshCachedContext(ctx);
   if(window.OOXII_DB) await window.OOXII_DB.context.set(ctx);
+  updateTesterCampFromContext(ctx);
   const label = (ctx.festivals.find(f=>f.festivalId===festivalId)||{}).festivalName || 'festival';
   setActiveTesterStation(null);
   toast('Switched to '+label);
@@ -1374,7 +1405,7 @@ async function tryRestoreOnlineSession(trace){
     });
     window.OOXII_BACKEND.refreshCachedContext(restored.context);
     trace.routingDecision = 'valid_supabase_session -> restored real tester -> ScreenHome';
-    go(ScreenHome);
+    maybeConfirmActiveFestival(restored.context, ()=>go(ScreenHome));
     return true;
   }catch(e){
     trace.error = e.message;
@@ -1434,6 +1465,40 @@ async function doOnlineSignIn(){
   window.OOXII_BACKEND.refreshCachedContext(r.context);
   promptOfflinePinSetup();
 }
+/* A tester must explicitly see/confirm which festival they're working at
+   before Home shows — previously this was silently auto-picked
+   (memberships[0], from the query's arbitrary row order) with no
+   acknowledgment at all. Shown once per browser session (sessionStorage,
+   cleared on tab close, same convention as isDemoModeSession()) — a
+   single-festival tester has nothing to choose, so this never interrupts
+   them; a multi-festival tester sees a one-time picker defaulting to
+   whatever's already active, not a forced re-choice on every screen. */
+function maybeConfirmActiveFestival(ctx, thenGo){
+  if(!ctx || !ctx.festivals || ctx.festivals.length<=1 || sessionStorage.getItem('hl_festival_confirmed')==='true'){
+    thenGo();
+    return;
+  }
+  const opts=ctx.festivals.map(f=>`<option value="${f.festivalId}" ${f.festivalId===ctx.activeFestivalId?'selected':''}>${f.festivalName}</option>`).join('');
+  scrim(`<div class="modal">
+    <div class="ic sq" style="background:var(--chip);width:60px;height:60px;margin:0 auto 12px">${I('eye',28,'#1cc3d6')}</div>
+    <h3>Which festival are you working at?</h3>
+    <p>You're assigned to ${ctx.festivals.length} festivals. Confirm which one before registering any clients today.</p>
+    <select id="fc-select" class="full" style="margin-bottom:14px">${opts}</select>
+    <button class="btn btn-primary" onclick="confirmActiveFestivalChoice()">Confirm and continue</button>
+  </div>`);
+  window.__festivalConfirmThenGo = thenGo;
+}
+async function confirmActiveFestivalChoice(){
+  const festivalId = document.getElementById('fc-select').value;
+  const ctx = window.OOXII_BACKEND.getCachedContext();
+  if(ctx && festivalId!==ctx.activeFestivalId){
+    await reallySwitchActiveFestival(festivalId);
+  }
+  try{ sessionStorage.setItem('hl_festival_confirmed','true'); }catch(e){}
+  closeScrim();
+  const thenGo=window.__festivalConfirmThenGo; window.__festivalConfirmThenGo=null;
+  if(thenGo) thenGo();
+}
 function promptOfflinePinSetup(){
   scrim(`<div class="modal">
     <div class="ic sq" style="background:var(--chip);width:60px;height:60px;margin:0 auto 12px">${I('shield',28,'#1cc3d6')}</div>
@@ -1442,7 +1507,7 @@ function promptOfflinePinSetup(){
     <input id="pin-set" class="full" type="password" inputmode="numeric" maxlength="8" placeholder="4–8 digit PIN" style="text-align:center;font-size:20px;letter-spacing:4px;margin-bottom:10px">
     <div id="pin-set-err" class="err" style="display:none"></div>
     <button class="btn btn-primary" onclick="confirmOfflinePinSetup()">Save PIN &amp; continue</button>
-    <button class="btn btn-secondary" onclick="closeScrim();go(ScreenHome)">Skip for now</button>
+    <button class="btn btn-secondary" onclick="closeScrim();maybeConfirmActiveFestival(window.OOXII_BACKEND.getCachedContext(),()=>go(ScreenHome))">Skip for now</button>
   </div>`);
 }
 async function confirmOfflinePinSetup(){
@@ -1454,7 +1519,7 @@ async function confirmOfflinePinSetup(){
   if(!r.ok){ const e=document.getElementById('pin-set-err'); e.style.display='block'; e.textContent=r.error; return; }
   closeScrim();
   toast('Offline access ready for 30 days');
-  go(ScreenHome);
+  maybeConfirmActiveFestival(window.OOXII_BACKEND.getCachedContext(), ()=>go(ScreenHome));
 }
 
 function renderOfflineUnlock(){
@@ -1497,7 +1562,7 @@ async function doOfflineUnlock(){
   applyAuthContext(r.context, 'offline-real');
   window.OOXII_BACKEND.refreshCachedContext(r.context);
   toast('Signed in offline','cloud');
-  go(ScreenHome);
+  maybeConfirmActiveFestival(r.context, ()=>go(ScreenHome));
 }
 
 /** Map the backend auth context onto the existing `state.tester` shape the
@@ -1515,10 +1580,19 @@ function applyAuthContext(ctx, mode){
   state.tester.name = ctx.displayName;
   state.tester.email = ctx.email || state.tester.email;
   state.tester.testerId = ctx.userId ? ctx.userId.slice(0,8).toUpperCase() : state.tester.testerId;
-  if(ctx.festivals && ctx.festivals[0]){
-    state.tester.camp = ctx.festivals[0].festivalName;
-  }
+  // Was ctx.festivals[0].festivalName unconditionally — the FIRST membership
+  // row, regardless of which festival is actually active (ctx.activeFestivalId).
+  // A tester who had switched festivals in a previous session would see the
+  // Home banner keep showing their first-ever membership forever, no matter
+  // what they actually had selected. Must track the ACTIVE one, and
+  // switchActiveFestival() below keeps this in sync when it changes.
+  updateTesterCampFromContext(ctx);
   console.info('[AUTH TRACE] applyAuthContext() state.tester.name assigned directly from ctx.displayName; authMode set from explicit caller-provided mode, never from the name', { testerNameAfter: state.tester.name, authModeAfter: state.authMode });
+}
+function updateTesterCampFromContext(ctx){
+  if(!ctx || !ctx.festivals) return;
+  const active = ctx.festivals.find(f=>f.festivalId===ctx.activeFestivalId) || ctx.festivals[0];
+  if(active) state.tester.camp = active.festivalName;
 }
 /* ============================ HOME (tablet dashboard: sidebar + 3 nav cards) ============================ */
 function honeyDropIcon(w=18,h=24,id='dgS'){
@@ -1555,6 +1629,7 @@ function sidebar(){
         <div class="tester-avatar">${I('person',26)}</div>
         <div><div class="tester-name">${t.name}</div><div class="tester-id">Tester ID: ${t.testerId}</div></div>
       </div>
+      ${t.camp?`<div class="offline-sub" style="margin-top:8px;color:var(--teal-2);font-weight:700">${I('eye',14,'#1cc3d6')} ${t.camp}${isDemoModeSession()?' (demo data)':''}</div>`:''}
       <div class="station-chip ${(st||isIndividualMode())?'':'none'}">${I(isIndividualMode()?'person':(st?stationIcon(st):'warn'),15,(st||isIndividualMode())?'#1cc3d6':'#f5b945')}
         ${isIndividualMode()?'Individual testing':(st?stationLabel(st)+' station':'No station chosen')}</div>
       <button class="side-btn" onclick="go(ScreenFestival)">${I('wheel',16,'#fff')} ${isIndividualMode()?'Festival stations':(st?'Change station':'Choose station')}</button>
