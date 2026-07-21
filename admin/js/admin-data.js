@@ -101,6 +101,37 @@
     return data;
   }
 
+  async function getDailyDispensed(days = 30) {
+    const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    const { data, error } = await sb().from('v_admin_daily_dispensed').select('*').gte('day', since).order('day');
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function getAllDailyClients() {
+    const { data, error } = await sb().from('v_admin_daily_clients').select('*').order('day');
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function getAllDailyDispensed() {
+    const { data, error } = await sb().from('v_admin_daily_dispensed').select('*').order('day');
+    if (error) throw error;
+    return data || [];
+  }
+
+  async function getAvgCompletionTime() {
+    const { data, error } = await sb().from('v_admin_avg_completion_time').select('*').single();
+    if (error) throw error;
+    return data;
+  }
+
+  async function getFestivalImpact() {
+    const { data, error } = await sb().from('v_admin_festival_impact').select('*').order('clients', { ascending: false });
+    if (error) throw error;
+    return data || [];
+  }
+
   /**
    * Filtered, flattened research dataset (v_admin_research_sessions).
    * filters: { dateFrom, dateTo, festivalId, village, ageBand, gender,
@@ -131,5 +162,7 @@
     getFestivals, getSyncConflicts, getResearchSessions,
     getAgeDistribution, getGenderDistribution, getVillageDistribution,
     getLensPowerDistribution, getFestivalThroughput, getDataQuality,
+    getDailyDispensed, getAllDailyClients, getAllDailyDispensed,
+    getAvgCompletionTime, getFestivalImpact,
   };
 })();
