@@ -2327,6 +2327,7 @@ function searchResultCard(s, syncStatus){
       ${ctxCell('Last completed',lastCompletedStation(s))}
       ${ctxCell('Your station',activeContextLabel())}
     </div>
+    <button class="btn btn-secondary" style="margin-top:14px" onclick="showHandoverQR('${s.id}')">${I('qrshow',20,'#fff')} Show latest QR</button>
     ${syncStatus==='conflicted'?`<div class="notice" style="margin:14px 0 0"><span class="x">${I('warn',20,'#f06a7a')}</span>
         <div><div class="t">Sync conflict</div><div class="s">This client has a conflict awaiting coordinator review — data shown may not be current. See BACKEND_TEST_PLAN.md.</div></div></div>`:''}
     ${canOpen
@@ -3114,7 +3115,8 @@ async function showHandoverQR(id, after){
   scrim(`<div class="modal" style="max-width:380px">
     <h3>Handover QR</h3>
     <div class="id-big">${s.id}</div>
-    <p>Next step: <b style="color:#fff">${stepLabel(DE.getNextRequiredStep(s))}</b><br>Scan on the next station's device to continue.</p>
+    <p>Last completed: <b style="color:#fff">${lastCompletedStation(s)}</b> · Updated ${s.time||'—'}<br>
+    Next step: <b style="color:#fff">${stepLabel(DE.getNextRequiredStep(s))}</b><br>Scan on the next station's device to continue.</p>
     <div class="qrbox" id="qr-target"></div>
     <p style="font-size:12px;margin-top:0">No personal data — anonymous clinical workflow only.</p>
     <button class="btn btn-primary" onclick="closeScrim();${after?'__qrAfter()':''}">Done</button>
