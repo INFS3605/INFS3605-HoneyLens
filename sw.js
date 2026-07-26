@@ -109,7 +109,21 @@
 // treating "not individual mode" alone as reason enough to lock. Only
 // index.html changed. No schema/migration change required. Same
 // controlled, tester-consented activation as every version above.
-const CACHE_VERSION = 'v13';
+//
+// v14: Exit is not a physical station. Route "none" (Distance pass +
+// Near pass) sends the next required step straight to 'Exit', which
+// still carries its own STEP_STATION entry for other purposes (station
+// picker, read-only review after completion) — but for the ACTIVE
+// same-device-continues decision, both isCrossStationHandover() and
+// canActiveTesterOpenSession() now special-case next==='Exit' so it's
+// never treated as a handover target and never blocked by the station-
+// role check either. STEP_STATION and DE.canOpenStep() themselves are
+// untouched — this is a narrow exemption in the two wrapper functions
+// that already owned this decision, not a change to the clinical
+// decision engine. Only index.html changed. No schema/migration change
+// required. Same controlled, tester-consented activation as every
+// version above.
+const CACHE_VERSION = 'v14';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 

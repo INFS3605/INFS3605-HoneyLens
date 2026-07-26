@@ -946,7 +946,16 @@ function canActiveTesterOpenSession(s){
   if(!isSessionWritable(s)) return false; // handed off to another station — must be explicitly reopened first
   if(isIndividualMode()) return true; // no station gate — step order still enforced by guardStep
   const st = getActiveTesterStation();
-  return !!st && DE.canOpenStep(s, st);
+  if(!st) return false;
+  // Exit is not a physical station (see isCrossStationHandover()) — it's
+  // the terminal no-glasses outcome (route "none"), reached only straight
+  // after Near, always completed by whichever device just did Distance/
+  // Near. DE.canOpenStep()/STEP_STATION are left untouched (still the
+  // real station-gating authority for every other transition and for
+  // reviewing an already-completed session from elsewhere) — this is a
+  // narrow exemption for the one case that was never a real handover.
+  if(DE.getNextRequiredStep(s)==='Exit' && st===STEP_STATION.Near) return true;
+  return DE.canOpenStep(s, st);
 }
 
 /* ============================ STATION HANDOVER (QR handover ownership) ============================ */
@@ -978,6 +987,14 @@ function isSessionWritable(s){
    canActiveTesterOpenSession, but defensive) falls back to treating it as
    a handover — the safer default. */
 function isCrossStationHandover(s){
+  // Exit is never a physical station for handover purposes — it's the
+  // terminal no-glasses outcome, reached ONLY via route "none"
+  // (ROUTE_PATHS.none = ['Exit'], Distance pass + Near pass) straight
+  // after Near, at the same station that just did Distance/Near. 'Exit'
+  // can never appear as the next required step from any other route, so
+  // this can never accidentally suppress a real handover elsewhere (e.g.
+  // Wheel/Paddle -> Dispense is untouched by this check).
+  if(DE.getNextRequiredStep(s)==='Exit') return false;
   const current = getActiveTesterStation();
   if(!current) return true;
   return current !== getRequiredStation(s);
