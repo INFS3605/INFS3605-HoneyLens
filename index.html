@@ -3191,9 +3191,15 @@ function showQRError(msg){
    function's real "completion" is the tester tapping Done/Close on the
    modal it shows, not its own promise settling — there is nothing for a
    caller to usefully await. */
-async function showHandoverQR(id, after){
-  console.info('[QR TRACE] showHandoverQR() entered', { clientId:id, fflateExists:!!window.fflate, QRCodeExists:!!window.QRCode });
+async function showHandoverQR(id, after, opts){
+  console.info('[QR TRACE] showHandoverQR() entered', { clientId:id, fflateExists:!!window.fflate, QRCodeExists:!!window.QRCode, opts:opts||null });
   window.__qrAfter = after||null;
+  // Only a REAL station-to-station handover (finishStationTask, festival
+  // mode only) confirms sync and locks the sending device — re-showing an
+  // already-generated code (Search Client's "Show latest QR", the Dispense
+  // summary card) is a pure read+render of whatever's already saved, exactly
+  // as before, and never re-locks or re-gates anything.
+  const isHandoff = !!(opts && opts.isHandoff) && !isIndividualMode();
   if(!window.OOXII_DB){
     showQRGenerationError('This device could not read its saved copy of this client (local storage unavailable). Nothing was generated.');
     return;
@@ -3259,9 +3265,35 @@ async function showHandoverQR(id, after){
     }
   }
 
+  // A real handover: make sure this client's information is saved before
+  // generating a QR that the next station will treat as the current record.
+  // If we can't confirm that (no connection, or a sync attempt didn't fully
+  // finish), the QR is still generated — the workflow must keep working with
+  // no connection — but it's clearly marked so everyone knows it will
+  // finish saving once a device reconnects.
+  let provisional = false;
+  if(isHandoff){
+    if(navigator.onLine && window.OOXII_SYNC && window.OOXII_SYNC.ensureSyncedBeforeHandover){
+      const result = await window.OOXII_SYNC.ensureSyncedBeforeHandover(s.id);
+      provisional = !result.confirmed;
+      if(result.confirmed && window.OOXII_SYNC.fetchAuthoritativeSession && s._serverId){
+        try{
+          const row = await window.OOXII_SYNC.fetchAuthoritativeSession(s._serverId);
+          if(row && (row.version||0) > (s.version||0)){
+            await window.OOXII_SYNC.applyServerSnapshot(s.id, row);
+            const refreshed = await window.OOXII_DB.sessions.get(id);
+            if(refreshed) Object.assign(s, refreshed);
+          }
+        }catch(e){ console.error('[OOXii] Could not confirm the latest saved information before handover', id, e); }
+      }
+    } else {
+      provisional = true;
+    }
+  }
+
   let payload=null;
   try{
-    payload=qrPayloadFor(s);
+    payload=qrPayloadFor(s, provisional);
     if(!payload) throw new Error('qrPayloadFor returned empty payload');
   }catch(e){
     console.error('[QR TRACE] showHandoverQR() failed to build the QR payload', { clientId:s.id, message:e.message, stack:e.stack });
@@ -3276,6 +3308,10 @@ async function showHandoverQR(id, after){
     <div class="id-big">${s.id}</div>
     <p>Last completed: <b style="color:#fff">${lastCompletedStation(s)}</b> · Updated ${s.time||'—'}<br>
     Next step: <b style="color:#fff">${stepLabel(DE.getNextRequiredStep(s))}</b><br>Scan on the next station's device to continue.</p>
+    ${isHandoff?(provisional
+      ?`<div class="notice warn" style="margin:10px 0"><span class="x">${I('cloud',20,'#f5b945')}</span><div><div class="t">Saved on this device</div><div class="s">No connection right now — client information is saved here and can still be passed to the next station. It will finish saving once a device reconnects.</div></div></div>`
+      :`<div class="notice" style="margin:10px 0;background:rgba(74,222,128,.1);border-color:rgba(74,222,128,.3)"><span class="x">${I('check',20,'#4ade80')}</span><div><div class="t">Saved and confirmed</div><div class="s">This client's information is saved and up to date.</div></div></div>`
+    ):''}
     <div class="qrbox" id="qr-target"></div>
     <p style="font-size:12px;margin-top:0">No personal data — anonymous clinical workflow only.</p>
     <button class="btn btn-primary" onclick="closeScrim();${after?'__qrAfter()':''}">Done</button>
@@ -3300,6 +3336,18 @@ async function showHandoverQR(id, after){
   console.info('[QR TRACE] showHandoverQR() renderQrInto() result', { clientId:s.id, ok });
   if(!ok){
     showQRGenerationError('Unable to generate QR code. Please try again.');
+    return;
+  }
+  if(isHandoff){
+    // Lock this device out of further edits to this client — the whole
+    // point of a real handover. `nextStation` was already validated above
+    // (pre-render validation refuses to proceed without one).
+    s._handover = { writable:false, confidence: provisional?'provisional':'confirmed',
+      handedOffAtVersion:s.version, handedOffToStation:nextStation,
+      handedOffAt:new Date().toISOString(), qrEventId:s._lastEventId||null };
+    await window.OOXII_DB.sessions.put(s);
+    if(state.sessions[id]) state.sessions[id]._handover = s._handover;
+    toast('Client handed to '+stationLabel(nextStation));
   }
 }
 function showQRGenerationError(msg){
@@ -3564,7 +3612,7 @@ function finishStationTask(s,label,after){
   const r=awardHoney();
   const cont=()=>honeyAfterSave(r,label, after || (()=>afterStationSave(s)));
   if(isIndividualMode()) cont();
-  else showHandoverQR(s.id, cont);
+  else showHandoverQR(s.id, cont, {isHandoff:true});
 }
 
 /* advance after a station save: generate QR, then route ONLY where the active
