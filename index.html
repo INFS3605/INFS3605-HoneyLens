@@ -2871,7 +2871,7 @@ function fnv1aHash(str){
 function canonicalStringForChecksum(compact){
   // Fixed field order, independent of object-key insertion order — computed
   // identically at encode and decode time so the checksum is unambiguous.
-  return [compact.v, compact.c, compact.s||'', compact.f||'', compact.e||'', compact.n, JSON.stringify(compact.r)].join('|');
+  return [compact.v, compact.c, compact.s||'', compact.f||'', compact.e||'', compact.n, compact.pf||0, JSON.stringify(compact.r)].join('|');
 }
 function b64urlEncode(bytes){
   let bin=''; for(let i=0;i<bytes.length;i++) bin+=String.fromCharCode(bytes[i]);
@@ -2964,14 +2964,21 @@ function expandResults(cid, ver, r){
    error handling) rather than silently emitting something the decoder can't
    tell apart from a compressed payload if the compression library failed
    to load — never ship a payload under the OOX2 prefix that isn't real. */
-function encodeQrPayload(s){
-  console.info('[QR TRACE] encodeQrPayload() entered', { clientId:s.id, version:s.version, fflateExists:!!window.fflate });
+function encodeQrPayload(s, provisional){
+  console.info('[QR TRACE] encodeQrPayload() entered', { clientId:s.id, version:s.version, fflateExists:!!window.fflate, provisional:!!provisional });
   try{
     const ctx = window.OOXII_BACKEND ? window.OOXII_BACKEND.getCachedContext() : null;
     // sid is the real client_sessions.id (server UUID) so a later sync can
     // write to the SAME server row from either device.
     const sid = window.OOXII_SESSIONS ? window.OOXII_SESSIONS.ensureServerId(s) : ('uuid-'+s.id);
-    const compact = { v:2, c:s.id, s:sid, f: ctx?ctx.activeFestivalId:null, e:s._lastEventId||null, n:s.version, r:compactResultsFor(s) };
+    // pf ("provisional"): set when this device could not confirm this QR's
+    // data was fully synced/confirmed before generating it (offline, or an
+    // online sync attempt that didn't fully drain). The receiving device
+    // never trusts this flag for its own authority decision — it always
+    // re-checks against the live server itself when it can (see
+    // handleScannedPayload) — this is only carried through for the
+    // receiving device's own display/messaging.
+    const compact = { v:2, c:s.id, s:sid, f: ctx?ctx.activeFestivalId:null, e:s._lastEventId||null, n:s.version, pf: provisional?1:0, r:compactResultsFor(s) };
     const checksum = fnv1aHash(canonicalStringForChecksum(compact));
     const withChecksum = Object.assign({}, compact, {k:checksum});
     const jsonString = JSON.stringify(withChecksum);
@@ -3004,17 +3011,17 @@ function decodeQrPayload(raw){
     if(fnv1aHash(canonicalStringForChecksum(compact))!==compact.k) return {error:'checksum'};
     let expanded;
     try{ expanded=expandResults(compact.c, compact.n, compact.r); }catch(e){ return {error:'corrupt'}; }
-    return { cid:compact.c, sid:compact.s||null, fid:compact.f||null, eid:compact.e||null, ver:compact.n, snap:expanded };
+    return { cid:compact.c, sid:compact.s||null, fid:compact.f||null, eid:compact.e||null, ver:compact.n, provisional:!!compact.pf, snap:expanded };
   }
   let p=null;
   try{ p=JSON.parse(raw); }catch(e){ return {error:'unrecognised'}; }
   if(!p || p.v!==1 || !p.cid) return {error:'unrecognised'};
-  return { cid:p.cid, sid:p.sid||null, fid:p.fid||null, eid:p.eid||null, ver:p.ver, snap:p.snap };
+  return { cid:p.cid, sid:p.sid||null, fid:p.fid||null, eid:p.eid||null, ver:p.ver, provisional:false, snap:p.snap };
 }
 /* single source for the handover QR payload */
-function qrPayloadFor(s){
-  console.info('[QR TRACE] qrPayloadFor() entered', { clientId:s.id, version:s.version });
-  return encodeQrPayload(s);
+function qrPayloadFor(s, provisional){
+  console.info('[QR TRACE] qrPayloadFor() entered', { clientId:s.id, version:s.version, provisional:!!provisional });
+  return encodeQrPayload(s, provisional);
 }
 function simulateScan(id){ closeScrim(); handleScannedPayload(qrPayloadFor(state.sessions[id])); }
 function simulateScanRaw(raw){ closeScrim(); handleScannedPayload(raw); }

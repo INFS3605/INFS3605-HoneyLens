@@ -116,6 +116,18 @@
   async function applyServerSnapshot(clientId, serverRow) {
     if (!serverRow) return;
     const local = await window.OOXII_DB.sessions.get(clientId);
+    // A session the server considers Finalised is never editable again from
+    // any device through the normal save path (only an explicit correction
+    // workflow may touch it — see apply_session_event()'s own finalised
+    // check) — so any device pulling this snapshot locks itself out too,
+    // regardless of whatever handover state it previously held. A
+    // non-finalised row leaves whatever handover lock/unlock state was
+    // already there untouched (this function only ever corrects clinical
+    // data + version, never decides handover ownership on its own).
+    const prevHandover = (local && local._handover) || null;
+    const nextHandover = serverRow.status === 'Finalised'
+      ? Object.assign({}, prevHandover, { writable: false, confidence: 'confirmed' })
+      : prevHandover;
     const merged = Object.assign({}, local, {
       id: clientId,
       _serverId: serverRow.id,
@@ -128,6 +140,7 @@
       paddle: serverRow.paddle || (local && local.paddle) || null,
       dispense: serverRow.dispense || (local && local.dispense) || null,
       exit: serverRow.exit_data || (local && local.exit) || null,
+      _handover: nextHandover,
     });
     await window.OOXII_DB.sessions.put(merged);
     // `state` is index.html's top-level `const state` — a classic <script>'s
@@ -138,6 +151,62 @@
     const st = (typeof state!=='undefined') ? state : null;
     if (st && st.sessions && st.sessions[clientId]) {
       Object.assign(st.sessions[clientId], merged);
+    }
+  }
+
+  /** Raw client_sessions row → the same session shape state.sessions already
+   *  uses (mirrors backend-adapter.js's serverRowToSession — duplicated here,
+   *  not imported, since backend-adapter.js doesn't export it and this file
+   *  must not depend on load order between the two). Used only by the
+   *  handover-reconciliation paths below, never by the normal sync loop
+   *  (which uses applyServerSnapshot's own merge instead). */
+  function sessionFromServerRow(clientId, row) {
+    if (!row) return null;
+    return {
+      id: clientId, _serverId: row.id, status: row.status, version: row.version,
+      time: new Date().toISOString().slice(11, 16),
+      intake: { ageBand: row.age_band, gender: row.gender, village: row.village, cataract: row.cataract },
+      distance: row.distance || null, near: row.near || null, wheel: row.wheel || null,
+      paddle: row.paddle || null, dispense: row.dispense || null, exit: row.exit_data || null,
+    };
+  }
+
+  /** A fresh, read-only look at the canonical row for one session, by its
+   *  stable server id — used before generating a handover QR (confirm what
+   *  we're about to hand off) and before importing one (never let an older
+   *  QR silently win over what the server already has). Returns null
+   *  whenever it can't be confirmed (offline, not configured, no row yet,
+   *  or a network error) — callers treat that as "could not confirm", never
+   *  as "confirmed empty". */
+  async function fetchAuthoritativeSession(sessionServerId) {
+    if (!navigator.onLine || !window.OOXII_CONFIG_VALID || !sessionServerId) return null;
+    try {
+      const { data, error } = await window.OOXII_SUPABASE
+        .from('client_sessions').select('*').eq('id', sessionServerId).maybeSingle();
+      if (error || !data) return null;
+      return data;
+    } catch (e) { return null; }
+  }
+
+  /** Best-effort: push this session's own queued events, then report whether
+   *  it is now fully drained (no pending event, no filed conflict) — the
+   *  gate a handover QR must pass before it can be generated as a confirmed
+   *  (non-provisional) handover. Never throws; a failure here is reported as
+   *  "not confirmed", which the caller (showHandoverQR) already treats the
+   *  same as being offline — fall back to an explicit offline-provisional
+   *  handover rather than leaving the tester stuck with no way to proceed. */
+  async function ensureSyncedBeforeHandover(clientId) {
+    if (!navigator.onLine || !window.OOXII_CONFIG_VALID) return { confirmed: false, reason: 'offline' };
+    try { await syncNow(); } catch (e) { /* fall through to the pending/conflict re-check below */ }
+    try {
+      const [pending, conflicts] = await Promise.all([
+        window.OOXII_DB.pendingEvents.all(), window.OOXII_DB.conflicts.all(),
+      ]);
+      if (conflicts.some((c) => c.clientId === clientId)) return { confirmed: false, reason: 'conflict' };
+      if (pending.some((e) => e.clientId === clientId)) return { confirmed: false, reason: 'still_pending' };
+      return { confirmed: true };
+    } catch (e) {
+      return { confirmed: false, reason: 'error' };
     }
   }
 
@@ -236,7 +305,9 @@
     }
 
     // conflict / sequence_error: a real validation failure — never retried,
-    // never silently overwritten
+    // never silently overwritten. The conflicting event's own data is
+    // preserved here exactly as before (this record is never deleted or
+    // altered by anything in this file).
     await window.OOXII_DB.conflicts.put({
       id: crypto.randomUUID(),
       eventId: event.id,
@@ -247,6 +318,32 @@
       detectedAt: new Date().toISOString(),
     });
     await window.OOXII_DB.pendingEvents.remove(event.id);
+
+    // Root-cause fix for the cascading-conflict failure mode: previously,
+    // this device's local session.version was left exactly as it was after
+    // a rejection, so every later save from it computed the SAME wrong
+    // base_version and conflicted again (confirmed live against session
+    // 4da8558f-813e-4369-9668-aea395047117 — repeated version_mismatch/
+    // finalised_session_changed rows). data.session is the authoritative
+    // row apply_session_event() actually rejected against — apply it
+    // locally right away (same function the success path already uses)
+    // so this device's own copy is corrected immediately, without waiting
+    // for a human to intervene. This never discards the rejected event's
+    // data (still filed above, untouched) and never weakens the server's
+    // own version check — it only fixes what happens to the LOSING side
+    // afterward.
+    if (data.session) {
+      await applyServerSnapshot(event.clientId, data.session);
+      try {
+        const corrected = await window.OOXII_DB.sessions.get(event.clientId);
+        if (corrected) {
+          corrected._hasUnresolvedConflict = true;
+          await window.OOXII_DB.sessions.put(corrected);
+          const st = (typeof state !== 'undefined') ? state : null;
+          if (st && st.sessions && st.sessions[event.clientId]) st.sessions[event.clientId]._hasUnresolvedConflict = true;
+        }
+      } catch (e) { /* the conflict is still filed above either way — this flag is best-effort UI signal only */ }
+    }
     return { conflicted: true, status: data.status };
   }
 
@@ -394,5 +491,8 @@
     syncNow().catch(() => {});
   }, PERIODIC_SYNC_INTERVAL_MS);
 
-  window.OOXII_SYNC = { syncNow, getSyncStatus };
+  window.OOXII_SYNC = {
+    syncNow, getSyncStatus, applyServerSnapshot,
+    fetchAuthoritativeSession, sessionFromServerRow, ensureSyncedBeforeHandover,
+  };
 })();
