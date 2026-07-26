@@ -3105,6 +3105,34 @@ async function handleScannedPayload(raw){
     return;
   }
 
+  // Never trust the QR's own embedded numbers as the final word on their
+  // own — when this device can reach the server, check the client's actual
+  // saved record there before treating what the QR carried as current. If
+  // the server already has something newer (someone else moved this client
+  // further than this QR knew about), that wins; the QR's own snapshot is
+  // never allowed to overwrite it. If the server can't be reached, continue
+  // safely from what the QR carried — this must keep working with no
+  // connection.
+  let confirmed=false;
+  if(p.sid && navigator.onLine && window.OOXII_SYNC && window.OOXII_SYNC.fetchAuthoritativeSession){
+    try{
+      const row = await window.OOXII_SYNC.fetchAuthoritativeSession(p.sid);
+      if(row){
+        if((row.version||0) > (opened.version||0)){
+          opened = window.OOXII_SYNC.sessionFromServerRow(p.cid, row);
+          toast('This client had newer saved information — using the latest.','warn');
+          confirmed=true;
+        } else if((row.version||0) === (opened.version||0)){
+          confirmed=true;
+        }
+        // server behind what the QR carried: this device's copy just hasn't
+        // reached the server yet — keep it, but it stays unconfirmed below.
+      }
+    }catch(e){ console.error('[OOXii] Could not check the latest saved information for this client', p.cid, e); }
+  }
+  opened._handover = { writable:true, confidence: confirmed?'confirmed':'provisional',
+    handedOffAtVersion:null, handedOffToStation:null, handedOffAt:null, qrEventId:null };
+
   if(!window.OOXII_DB){
     showQRError('The QR was read, but this device could not save the client. Please free storage and try again.');
     return;
