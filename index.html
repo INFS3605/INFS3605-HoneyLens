@@ -1682,6 +1682,17 @@ function getHoneyTotals(){
   if(!cached) return {today:state.honey.today, month:state.honey.monthClients, pendingCount:0, confirmed:false};
   return {today:cached.today, month:cached.month, pendingCount:cached.pendingCount, confirmed:true};
 }
+/* Coordinators/administrators get a link to the Insights Portal from inside
+   the main app — everyone else never sees it. This is a UI convenience
+   only: /admin/ independently checks the SAME profiles.app_role itself
+   (admin/js/admin-auth.js) before showing anything, so hiding the link here
+   is not the actual access control, just keeps ordinary testers from being
+   offered a page that isn't for them. */
+function isCoordinatorContext(){
+  const ctx = window.OOXII_BACKEND ? window.OOXII_BACKEND.getCachedContext() : null;
+  return !!ctx && (ctx.appRole==='coordinator' || ctx.appRole==='administrator');
+}
+function openInsightsPortal(){ location.href='/admin/'; }
 function sidebar(){
   const t=state.tester, h=state.honey;
   const totals=getHoneyTotals();
@@ -1700,6 +1711,7 @@ function sidebar(){
       <div class="station-chip ${(st||isIndividualMode())?'':'none'}">${I(isIndividualMode()?'person':(st?stationIcon(st):'warn'),15,(st||isIndividualMode())?'#1cc3d6':'#f5b945')}
         ${isIndividualMode()?'Individual testing':(st?stationLabel(st)+' station':'No station chosen')}</div>
       <button class="side-btn" onclick="go(ScreenFestival)">${I('wheel',16,'#fff')} ${isIndividualMode()?'Festival stations':(st?'Change station':'Choose station')}</button>
+      ${isCoordinatorContext()?`<button class="side-btn" onclick="openInsightsPortal()">${I('note',16,'#fff')} Insights Portal</button>`:''}
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${connectivityBadge()}${syncStatusPill()}</div>
     </div>
     <div class="honey-card">

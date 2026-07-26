@@ -84,7 +84,21 @@
 // switching away from one. No schema/migration change required for any
 // of this. Same controlled, tester-consented activation as every
 // version above.
-const CACHE_VERSION = 'v11';
+//
+// v12: sequential multi-device QR handover fix (see the sync-conflict
+// investigation for session 4da8558f-813e-4369-9668-aea395047117). A
+// real station-to-station handover now confirms sync before generating
+// the QR when possible, marks it clearly when it can't, and locks the
+// sending device from further edits until explicitly reopened; a scanned
+// QR is checked against the server (when reachable) before being treated
+// as current; a rejected sync now corrects this device's local copy
+// immediately instead of repeating the same failure on every later save.
+// index.html and js/sync-service.js both changed — both are CORE_ASSETS,
+// so this bump is required for the fix to actually reach a browser
+// already on v11 (see the v6 note above for why). No schema/migration
+// change required — client-side only. Same controlled, tester-consented
+// activation as every version above.
+const CACHE_VERSION = 'v12';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
