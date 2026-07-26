@@ -21,6 +21,11 @@
 
   const MAX_BACKOFF_MS = 30000;
   let syncing = false;
+  // Local-event-ids currently in flight to apply_session_event(), for exactly
+  // the duration of the RPC call — this is what getSyncStatus()'s "Syncing"
+  // bucket reflects. Always empty between sync runs; never persisted (it
+  // describes what THIS tab is doing right now, not durable state).
+  const syncingEventIds = new Set();
   // True once this device's `devices` row has been confirmed to exist this
   // page load — avoids re-upserting on every syncNow() call (fired on
   // every save via persistAndQueue's fire-and-forget, on 'online', and on
@@ -64,16 +69,40 @@
     await window.OOXII_DB.syncMeta.set(Object.assign({}, meta, patch));
   }
 
+  /** Status definitions (each pendingEvents row falls into exactly ONE of
+   *  pendingCount/syncingCount/retryCount — never more than one, unlike the
+   *  old getSyncStatus() where every retry-needed event was ALSO counted
+   *  in pendingCount, double-counting the same event under two labels):
+   *   - Pending: queued, never yet attempted (attempts===0), not part of
+   *     an active sync run right now.
+   *   - Syncing: currently included in the active sync attempt in THIS
+   *     tab (syncingEventIds, set only for the duration of pushEvent()).
+   *     Cross-tab syncing elsewhere isn't visible here — the Web Locks
+   *     mutex already prevents this tab from starting its own run
+   *     concurrently (see syncNow()'s 'already_running_elsewhere').
+   *   - Retry needed: attempts>0 — failed with a transient/connectivity
+   *     error and is waiting for its next backoff attempt.
+   *   - Conflict: moved to the separate conflicts store — a real
+   *     validation failure (business/version conflict) apply_session_event()
+   *     explicitly rejected. Never retried, never silently overwritten.
+   *  There is no separate "Failed (non-retryable)" bucket: the RPC itself
+   *  only ever returns success (ok/duplicate_ok/already_applied/
+   *  merged_missing_fields) or a conflict status — every non-transient
+   *  failure already lands in the conflicts store above, so a distinct
+   *  "Failed" count would have zero real events behind it. */
   async function getSyncStatus() {
     const [pending, conflicts, meta] = await Promise.all([
       window.OOXII_DB.pendingEvents.all(),
       window.OOXII_DB.conflicts.all(),
       window.OOXII_DB.syncMeta.get(),
     ]);
-    const failed = pending.filter((e) => (e.attempts || 0) > 0);
+    const notSyncing = pending.filter((e) => !syncingEventIds.has(e.id));
+    const retrying = notSyncing.filter((e) => (e.attempts || 0) > 0);
+    const notYetAttempted = notSyncing.filter((e) => (e.attempts || 0) === 0);
     return {
-      pendingCount: pending.length,
-      failedCount: failed.length,
+      pendingCount: notYetAttempted.length,
+      syncingCount: syncingEventIds.size,
+      retryCount: retrying.length,
       conflictedCount: conflicts.length,
       lastSyncAt: meta ? meta.lastSyncAt : null,
       blocked: meta ? !!meta.blocked : false,
@@ -297,7 +326,13 @@
       let pushed = 0, conflicted = 0, blockedSessions = new Set();
       for (const event of due) {
         if (blockedSessions.has(event.clientId)) continue; // preserve per-session order
-        const result = await pushEvent(event);
+        syncingEventIds.add(event.id);
+        let result;
+        try {
+          result = await pushEvent(event);
+        } finally {
+          syncingEventIds.delete(event.id);
+        }
         if (result.synced) {
           pushed++;
           console.info('[SYNC TRACE] pending event disposition: REMOVED (synced)', { local_event_id: event.id, client_id: event.clientId });

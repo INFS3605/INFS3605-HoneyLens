@@ -86,6 +86,26 @@
   .pill{display:inline-flex; align-items:center; gap:7px; border:1px solid var(--border-2);
     border-radius:999px; padding:7px 13px; font-size:13px; font-weight:600; color:var(--teal-2)}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+  /* connectivity badge — real navigator.onLine state, distinct from the sync
+     badge (see .sync-pill below). .conn-pill defaults to the "online" look
+     inline (matches the pre-existing .pill/.dot colours); .conn-off is the
+     only state that needs an override. */
+  .conn-pill.conn-off{color:var(--amber)}
+  .conn-pill.conn-off .dot{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+  /* sync badge — a SEPARATE concept from connectivity (see .conn-pill
+     above): whether this device's local records have all reached
+     Supabase, not whether the browser currently has a network
+     connection. Always clickable through to the Sync queue screen. */
+  .sync-pill{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border-2);
+    border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:600;cursor:pointer;
+    background:none;color:var(--dim)}
+  .sync-pill .dot{width:7px;height:7px;background:var(--dim);box-shadow:none}
+  .sync-pill.sy-synced{color:var(--green)}
+  .sync-pill.sy-synced .dot{background:var(--green);box-shadow:0 0 6px var(--green)}
+  .sync-pill.sy-pending{color:var(--teal-2)}
+  .sync-pill.sy-pending .dot{background:var(--teal-2);box-shadow:0 0 6px var(--teal-2)}
+  .sync-pill.sy-error{color:var(--red)}
+  .sync-pill.sy-error .dot{background:var(--red);box-shadow:0 0 6px var(--red)}
   .offline-sub{font-size:13px; color:var(--dim); margin-top:6px}
   .client-sub{font-size:14px; color:var(--dim); margin-top:8px; font-weight:600}
 
@@ -317,6 +337,10 @@
     color:#fff;padding:13px 20px;border-radius:12px;font-weight:600;font-size:14px;z-index:60;box-shadow:var(--shadow);
     display:flex;gap:10px;align-items:center;max-width:340px}
   .err{color:var(--red);font-size:13px;margin-top:6px;font-weight:600}
+  .req-mark{color:var(--red);font-weight:800;margin-left:2px}
+  .req-note{font-size:12.5px;color:var(--dim);margin:2px 2px 16px;font-weight:600}
+  .field-invalid select,.field-invalid .seg,.field-invalid input{border:1px solid var(--red) !important;box-shadow:0 0 0 1px var(--red)}
+  .field-invalid-msg{color:var(--red);font-size:12.5px;font-weight:600;margin-top:6px}
 
   /* ===== top navigation ===== */
   .topnav{display:flex;align-items:center;justify-content:space-between;padding:16px 0 18px;
@@ -868,12 +892,43 @@ function isStationAllowed(key){
 }
 /* switching festivals clears the active station — a station assignment is
    always scoped to one festival, never carried over to another. */
+/* Warn before switching if THIS device has unsynced records for the
+   festival being left — never silently reassign or lose sight of them
+   (they keep their original festival_id regardless; this is purely a
+   "are you sure" prompt, mirroring doLogout()'s existing unsynced-records
+   modal). Explicit confirmation required only when there's real unsynced
+   work at stake; switching festivals when fully synced (or in demo mode,
+   with no IndexedDB-backed queue at all) proceeds immediately. */
 async function switchActiveFestival(festivalId){
+  const ctx = window.OOXII_BACKEND.getCachedContext();
+  if(!ctx || festivalId===ctx.activeFestivalId) return;
+  let unsyncedForCurrent = 0;
+  if(window.OOXII_DB){
+    try{
+      const pending = await window.OOXII_DB.pendingEvents.all();
+      unsyncedForCurrent = pending.filter(e=>e.festivalId===ctx.activeFestivalId).length;
+    }catch(e){ /* can't check — proceed as if none, rather than block on an unrelated storage error */ }
+  }
+  if(unsyncedForCurrent>0){
+    const currentLabel = (ctx.festivals.find(f=>f.festivalId===ctx.activeFestivalId)||{}).festivalName || 'your current festival';
+    scrim(`<div class="modal">
+      <div class="ic sq" style="background:rgba(245,185,69,.14);border:1px solid rgba(245,185,69,.4);width:60px;height:60px;margin:0 auto 12px">${I('warn',28,'#f5b945')}</div>
+      <h3>Unsynced records</h3>
+      <p>${unsyncedForCurrent} record${unsyncedForCurrent===1?'':'s'} for <b style="color:#fff">${currentLabel}</b> ${unsyncedForCurrent===1?'has':'have'} not synced from this device yet. They stay safe and keep their festival — switching just changes what you register NEXT.</p>
+      <button class="btn btn-primary" onclick="closeScrim();reallySwitchActiveFestival('${festivalId}')">Switch anyway</button>
+      <button class="btn btn-secondary" onclick="closeScrim()">Stay on ${currentLabel}</button>
+    </div>`);
+    return;
+  }
+  await reallySwitchActiveFestival(festivalId);
+}
+async function reallySwitchActiveFestival(festivalId){
   const ctx = window.OOXII_BACKEND.getCachedContext();
   if(!ctx) return;
   ctx.activeFestivalId = festivalId;
   window.OOXII_BACKEND.refreshCachedContext(ctx);
   if(window.OOXII_DB) await window.OOXII_DB.context.set(ctx);
+  updateTesterCampFromContext(ctx);
   const label = (ctx.festivals.find(f=>f.festivalId===festivalId)||{}).festivalName || 'festival';
   setActiveTesterStation(null);
   toast('Switched to '+label);
@@ -1116,7 +1171,7 @@ function I(name,size=24,stroke='#fff'){
 /* ============================ tiny helpers ============================ */
 const $ = sel => document.getElementById('screen').querySelector(sel);
 const screenEl = ()=>document.getElementById('screen');
-function go(fn){ state._currentScreenFn=fn; screenEl().scrollTop=0; fn(); }
+function go(fn){ state._currentScreenFn=fn; screenEl().scrollTop=0; fn(); refreshSyncStatusCache(); }
 /* Read by js/sw-register.js (a separate file — window is how it reaches
    this) before actually acting on a "Reload and update" press, so a
    service-worker update can never silently discard a client's unsaved
@@ -1131,6 +1186,68 @@ function isSafeToReloadNow(){
 }
 window.OOXII_SAFE_TO_RELOAD_NOW = isSafeToReloadNow;
 function pillClass(s){return 's-'+s.toLowerCase().replace(/[^a-z]/g,'');}
+/* ============================ connectivity (real navigator.onLine) ============================ */
+/* This badge answers exactly one question — "does this browser currently
+   have a network connection?" — using the browser's actual signal, never a
+   hard-coded label. It is deliberately NOT the sync badge (see
+   syncStatusPill() near ScreenSync): being online does not mean everything
+   has synced, and being offline does not mean data is unsafe (it's already
+   saved locally the moment it's entered — see .savebanner throughout the
+   clinical screens). Every rendered instance carries the shared
+   `.conn-pill` class so a single online/offline listener can update every
+   copy on the page in place, without a full screen re-render. */
+function connectivityBadge(suffix){
+  const online = navigator.onLine;
+  return `<span class="pill conn-pill ${online?'conn-ok':'conn-off'}"><span class="dot"></span><span class="conn-label">${online?'Online':'Offline'}</span></span>${suffix?` <span class="offline-sub" style="display:inline">${suffix}</span>`:''}`;
+}
+function updateConnectivityBadges(){
+  const online = navigator.onLine;
+  document.querySelectorAll('.conn-pill').forEach(el=>{
+    el.classList.toggle('conn-ok', online);
+    el.classList.toggle('conn-off', !online);
+    const label = el.querySelector('.conn-label');
+    if(label) label.textContent = online ? 'Online' : 'Offline';
+  });
+}
+window.addEventListener('online', updateConnectivityBadges);
+window.addEventListener('offline', updateConnectivityBadges);
+window.addEventListener('online', ()=>refreshSyncStatusCache());
+
+/* ============================ sync status pill (persistent, non-blocking) ============================ */
+/* A SEPARATE concept from the connectivity badge above: whether this
+   device's locally queued records have all reached Supabase, not whether
+   the browser currently has a network connection. Reachable from every
+   screen (header() + sidebar()) rather than only after finishing a whole
+   client workflow — previously the only way to see sync status at all was
+   the "Save for sync later" button on a finalised Dispense screen. Renders
+   synchronously from a cache (same pattern as getCachedHoneyDisplayTotalsSync/
+   refreshHoneyDisplayCache in js/backend-adapter.js) and refreshes in the
+   background on every screen navigation (see go()) and connectivity change,
+   patching every `.sync-pill` already in the DOM in place — no full
+   re-render, no blocking modal. */
+let cachedSyncStatus = null;
+function refreshSyncStatusCache(){
+  if(!window.OOXII_SYNC || !window.OOXII_CONFIG_VALID || isDemoModeSession()) return;
+  window.OOXII_SYNC.getSyncStatus().then((s)=>{ cachedSyncStatus=s; updateSyncPills(); }).catch(()=>{});
+}
+function syncPillContent(){
+  if(!window.OOXII_CONFIG_VALID || isDemoModeSession()){
+    return { label: state.sync.length ? state.sync.length+' queued' : 'Sync', cls: 'sy-offline' };
+  }
+  const s = cachedSyncStatus;
+  if(!s) return { label: 'Sync', cls: 'sy-offline' };
+  if(s.conflictedCount>0) return { label: s.conflictedCount+' conflict'+(s.conflictedCount===1?'':'s'), cls: 'sy-error' };
+  if(s.syncingCount>0) return { label: 'Syncing…', cls: 'sy-pending' };
+  if(s.pendingCount>0 || s.retryCount>0) return { label: (s.pendingCount+s.retryCount)+' pending', cls: 'sy-pending' };
+  return { label: 'Synced', cls: 'sy-synced' };
+}
+function syncStatusPill(){
+  const {label,cls} = syncPillContent();
+  return `<span class="sync-pill ${cls}" onclick="go(ScreenSync)" role="button" tabindex="0" onkeydown="if(event.key==='Enter')go(ScreenSync)"><span class="dot"></span>${label}</span>`;
+}
+function updateSyncPills(){
+  document.querySelectorAll('.sync-pill').forEach((el)=>{ el.outerHTML = syncStatusPill(); });
+}
 function toast(msg,icon='check'){
   const old=document.querySelector('.toast'); if(old)old.remove();
   const t=document.createElement('div'); t.className='toast';
@@ -1143,11 +1260,12 @@ function header(client){
   return `<div class="topbar">
     <div class="logo"><b>oox</b><span class="dots">ii</span></div>
     <div class="offline-wrap">
-      <span class="pill"><span class="dot"></span>Offline</span>
+      <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end">${connectivityBadge()}${syncStatusPill()}</div>
       ${showCtx?`<div class="offline-sub" style="color:var(--teal-2);font-weight:700">You are at: ${activeContextLabel()}</div>`:''}
-      ${client?`<div class="client-sub">Client ${client}</div>`:`<div class="offline-sub">Sync later</div>`}
+      ${client?`<div class="client-sub">Client ${client}</div>`:''}
     </div></div>`;
 }
+function requiredNote(){ return `<div class="req-note">* Required field</div>`; }
 function privacy(extra){
   return `<div class="privacy">
     <div class="shield">${I('shield',22,'#a7add9')}</div>
@@ -1287,7 +1405,7 @@ async function tryRestoreOnlineSession(trace){
     });
     window.OOXII_BACKEND.refreshCachedContext(restored.context);
     trace.routingDecision = 'valid_supabase_session -> restored real tester -> ScreenHome';
-    go(ScreenHome);
+    maybeConfirmActiveFestival(restored.context, ()=>go(ScreenHome));
     return true;
   }catch(e){
     trace.error = e.message;
@@ -1347,6 +1465,40 @@ async function doOnlineSignIn(){
   window.OOXII_BACKEND.refreshCachedContext(r.context);
   promptOfflinePinSetup();
 }
+/* A tester must explicitly see/confirm which festival they're working at
+   before Home shows — previously this was silently auto-picked
+   (memberships[0], from the query's arbitrary row order) with no
+   acknowledgment at all. Shown once per browser session (sessionStorage,
+   cleared on tab close, same convention as isDemoModeSession()) — a
+   single-festival tester has nothing to choose, so this never interrupts
+   them; a multi-festival tester sees a one-time picker defaulting to
+   whatever's already active, not a forced re-choice on every screen. */
+function maybeConfirmActiveFestival(ctx, thenGo){
+  if(!ctx || !ctx.festivals || ctx.festivals.length<=1 || sessionStorage.getItem('hl_festival_confirmed')==='true'){
+    thenGo();
+    return;
+  }
+  const opts=ctx.festivals.map(f=>`<option value="${f.festivalId}" ${f.festivalId===ctx.activeFestivalId?'selected':''}>${f.festivalName}</option>`).join('');
+  scrim(`<div class="modal">
+    <div class="ic sq" style="background:var(--chip);width:60px;height:60px;margin:0 auto 12px">${I('eye',28,'#1cc3d6')}</div>
+    <h3>Which festival are you working at?</h3>
+    <p>You're assigned to ${ctx.festivals.length} festivals. Confirm which one before registering any clients today.</p>
+    <select id="fc-select" class="full" style="margin-bottom:14px">${opts}</select>
+    <button class="btn btn-primary" onclick="confirmActiveFestivalChoice()">Confirm and continue</button>
+  </div>`);
+  window.__festivalConfirmThenGo = thenGo;
+}
+async function confirmActiveFestivalChoice(){
+  const festivalId = document.getElementById('fc-select').value;
+  const ctx = window.OOXII_BACKEND.getCachedContext();
+  if(ctx && festivalId!==ctx.activeFestivalId){
+    await reallySwitchActiveFestival(festivalId);
+  }
+  try{ sessionStorage.setItem('hl_festival_confirmed','true'); }catch(e){}
+  closeScrim();
+  const thenGo=window.__festivalConfirmThenGo; window.__festivalConfirmThenGo=null;
+  if(thenGo) thenGo();
+}
 function promptOfflinePinSetup(){
   scrim(`<div class="modal">
     <div class="ic sq" style="background:var(--chip);width:60px;height:60px;margin:0 auto 12px">${I('shield',28,'#1cc3d6')}</div>
@@ -1355,7 +1507,7 @@ function promptOfflinePinSetup(){
     <input id="pin-set" class="full" type="password" inputmode="numeric" maxlength="8" placeholder="4–8 digit PIN" style="text-align:center;font-size:20px;letter-spacing:4px;margin-bottom:10px">
     <div id="pin-set-err" class="err" style="display:none"></div>
     <button class="btn btn-primary" onclick="confirmOfflinePinSetup()">Save PIN &amp; continue</button>
-    <button class="btn btn-secondary" onclick="closeScrim();go(ScreenHome)">Skip for now</button>
+    <button class="btn btn-secondary" onclick="closeScrim();maybeConfirmActiveFestival(window.OOXII_BACKEND.getCachedContext(),()=>go(ScreenHome))">Skip for now</button>
   </div>`);
 }
 async function confirmOfflinePinSetup(){
@@ -1367,7 +1519,7 @@ async function confirmOfflinePinSetup(){
   if(!r.ok){ const e=document.getElementById('pin-set-err'); e.style.display='block'; e.textContent=r.error; return; }
   closeScrim();
   toast('Offline access ready for 30 days');
-  go(ScreenHome);
+  maybeConfirmActiveFestival(window.OOXII_BACKEND.getCachedContext(), ()=>go(ScreenHome));
 }
 
 function renderOfflineUnlock(){
@@ -1410,7 +1562,7 @@ async function doOfflineUnlock(){
   applyAuthContext(r.context, 'offline-real');
   window.OOXII_BACKEND.refreshCachedContext(r.context);
   toast('Signed in offline','cloud');
-  go(ScreenHome);
+  maybeConfirmActiveFestival(r.context, ()=>go(ScreenHome));
 }
 
 /** Map the backend auth context onto the existing `state.tester` shape the
@@ -1428,10 +1580,19 @@ function applyAuthContext(ctx, mode){
   state.tester.name = ctx.displayName;
   state.tester.email = ctx.email || state.tester.email;
   state.tester.testerId = ctx.userId ? ctx.userId.slice(0,8).toUpperCase() : state.tester.testerId;
-  if(ctx.festivals && ctx.festivals[0]){
-    state.tester.camp = ctx.festivals[0].festivalName;
-  }
+  // Was ctx.festivals[0].festivalName unconditionally — the FIRST membership
+  // row, regardless of which festival is actually active (ctx.activeFestivalId).
+  // A tester who had switched festivals in a previous session would see the
+  // Home banner keep showing their first-ever membership forever, no matter
+  // what they actually had selected. Must track the ACTIVE one, and
+  // switchActiveFestival() below keeps this in sync when it changes.
+  updateTesterCampFromContext(ctx);
   console.info('[AUTH TRACE] applyAuthContext() state.tester.name assigned directly from ctx.displayName; authMode set from explicit caller-provided mode, never from the name', { testerNameAfter: state.tester.name, authModeAfter: state.authMode });
+}
+function updateTesterCampFromContext(ctx){
+  if(!ctx || !ctx.festivals) return;
+  const active = ctx.festivals.find(f=>f.festivalId===ctx.activeFestivalId) || ctx.festivals[0];
+  if(active) state.tester.camp = active.festivalName;
 }
 /* ============================ HOME (tablet dashboard: sidebar + 3 nav cards) ============================ */
 function honeyDropIcon(w=18,h=24,id='dgS'){
@@ -1468,11 +1629,11 @@ function sidebar(){
         <div class="tester-avatar">${I('person',26)}</div>
         <div><div class="tester-name">${t.name}</div><div class="tester-id">Tester ID: ${t.testerId}</div></div>
       </div>
+      ${t.camp?`<div class="offline-sub" style="margin-top:8px;color:var(--teal-2);font-weight:700">${I('eye',14,'#1cc3d6')} ${t.camp}${isDemoModeSession()?' (demo data)':''}</div>`:''}
       <div class="station-chip ${(st||isIndividualMode())?'':'none'}">${I(isIndividualMode()?'person':(st?stationIcon(st):'warn'),15,(st||isIndividualMode())?'#1cc3d6':'#f5b945')}
         ${isIndividualMode()?'Individual testing':(st?stationLabel(st)+' station':'No station chosen')}</div>
       <button class="side-btn" onclick="go(ScreenFestival)">${I('wheel',16,'#fff')} ${isIndividualMode()?'Festival stations':(st?'Change station':'Choose station')}</button>
-      <div style="margin-top:12px"><span class="pill"><span class="dot"></span>Offline · saved here</span></div>
-      <div class="offline-sub" style="margin-top:8px">Sync queue: ${state.sync.length} waiting</div>
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">${connectivityBadge()}${syncStatusPill()}</div>
     </div>
     <div class="honey-card">
       <div style="display:flex;align-items:center;gap:9px;font-weight:800;font-size:15px">
@@ -1620,6 +1781,7 @@ function ScreenIntake(){
     ${header(s.id)}
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Works without internet</div><div class="s">Saved on this device</div></div></div>
+    ${requiredNote()}
 
     <div class="card" style="padding:16px;margin-bottom:14px;display:flex;align-items:center;gap:12px">
       <div class="ic sq" style="background:var(--chip)">${I('qr',24)}</div>
@@ -1627,11 +1789,11 @@ function ScreenIntake(){
       <div class="readout" style="min-width:auto">${s.id}</div>
     </div>
 
-    ${fieldSelect('person','Age band',null,'in-age',AGE_BANDS,k.ageBand)}
+    ${fieldSelect('person','Age band',null,'in-age',AGE_BANDS,k.ageBand,'Select age group')}
     ${fieldSeg('gender','Gender',null,'in-gender',['Male','Female'],k.gender)}
-    ${fieldSelect('home','Village / Location','From camp list','in-village',VILLAGES,k.village)}
-    ${fieldSelect('eye','Had cataract surgery?',null,'in-cat',['No','Yes, right eye','Yes, left eye','Yes, both eyes','Unsure'],k.cataract)}
-    ${fieldSeg('clipboard','Session type',null,'in-type',['Individual','Group'],k.sessionType||'Individual')}
+    ${fieldSelect('home','Village / Location','From camp list','in-village',VILLAGES,k.village,'Select location')}
+    ${fieldSelect('eye','Had cataract surgery?',null,'in-cat',['No','Yes, right eye','Yes, left eye','Yes, both eyes','Unsure'],k.cataract,'Select an option')}
+    ${fieldSeg('clipboard','Session type',null,'in-type',['Individual','Group'],k.sessionType||'Individual',false)}
 
     <div class="frow" style="align-items:flex-start">
       <div class="fic">${I('note',22)}</div>
@@ -1656,7 +1818,14 @@ async function saveIntake(){
     ageBand:$('#in-age').value, gender:segVal('in-gender'), village:$('#in-village').value,
     cataract:$('#in-cat').value, sessionType:segVal('in-type'), notes
   };
-  if(!s.intake.ageBand||!s.intake.gender||!s.intake.village||!s.intake.cataract){ toast('Complete all required fields','warn'); return; }
+  if(!s.intake.ageBand||!s.intake.gender||!s.intake.village||!s.intake.cataract){
+    toast('Complete all required fields','warn');
+    if(!s.intake.ageBand) markFieldInvalid('in-age','Select an age group.');
+    if(!s.intake.gender) markFieldInvalid('in-gender','Select a gender.');
+    if(!s.intake.village) markFieldInvalid('in-village','Select a location.');
+    if(!s.intake.cataract) markFieldInvalid('in-cat','Answer this question.');
+    return;
+  }
   s.status='In Progress'; s.path=['Registration','Distance']; s.dir='out'; s.time=nowTime(); s.version++;
   if(!state.queue.includes(s.id)) state.queue.unshift(s.id);
   await recordBackendEvent('Registration', s, 'Registration');
@@ -1687,6 +1856,7 @@ function ScreenDistance(){
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Distance', s)}
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Distance pre-test</div><div class="s">Both eyes tested separately, without glasses</div></div></div>
+    ${requiredNote()}
 
     ${instructionCard(eyeCoverGraphic('L'),'Right eye · no glasses','Ask the person to cover their left eye with the palm of their hand.')}
     ${fieldEyeLine('Smallest line all correct','d-rline',ru.lineReached,'r')}
@@ -1724,7 +1894,11 @@ async function saveDistance(){
   const g=segVal('d-glass');
   const right=chartResult(lineVal('d-rline'), +$('#d-rlet').value||0);
   const left =chartResult(lineVal('d-lline'), +$('#d-llet').value||0);
-  if(!right||!left||!g){ toast('Complete both eyes (lines 0–11) and the glasses question','warn'); return; }
+  if(!right||!left||!g){
+    toast('Complete both eyes (lines 0–11) and the glasses question','warn');
+    if(!g) markFieldInvalid('d-glass','Answer this question.');
+    return;
+  }
   let own=null;
   if(g==='Yes'){
     own=chartResult(lineVal('d-owline'), +$('#d-owlet').value||0);
@@ -1750,6 +1924,7 @@ function ScreenNear(){
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Distance', s)}
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Near pre-test</div><div class="s">Both eyes together, without glasses</div></div></div>
+    ${requiredNote()}
 
     ${instructionCard(bothEyesGraphic(),'Near vision · no glasses','Ask the person to use both eyes to read the near card.')}
     ${fieldEyeLine('Smallest near line all correct','n-line',u.lineReached,'both')}
@@ -1780,7 +1955,11 @@ async function saveNear(){
   const s=state.sessions[state.activeId]; if(!canCompleteStep(s,'Near')){ backToBase(); return; }
   const g=segVal('n-glass');
   const unaided=chartResult(lineVal('n-line'), +$('#n-let').value||0);
-  if(!unaided||!g){ toast('Complete the near line (0–11) and the glasses question','warn'); return; }
+  if(!unaided||!g){
+    toast('Complete the near line (0–11) and the glasses question','warn');
+    if(!g) markFieldInvalid('n-glass','Answer this question.');
+    return;
+  }
   let own=null;
   if(g==='Yes'){
     own=chartResult(lineVal('n-owline'), +$('#n-owlet').value||0);
@@ -1804,6 +1983,7 @@ function ScreenWheel(){
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Wheel', s)}
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Wheel test · to improve distance vision</div><div class="s">Saved on this device</div></div></div>
+    ${requiredNote()}
 
     ${fieldNumber('wheel','Pupillary distance (PD)','Valid range 52–78','w-pd',w.pd,52,78)}
 
@@ -1824,28 +2004,28 @@ function eyeBlock(title,p,key,e,instr,markerColor){
   return `<div class="sec" style="margin:22px 2px 10px"><h2 style="font-size:18px">
     <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${markerColor};margin-right:8px;vertical-align:middle;border:1px solid rgba(0,0,0,.2)"></span>${title}</h2></div>
     ${instructionCard(eyeCoverGraphic(p==='r'?'L':'R'), 'Cover the other eye', instr)}
-    <div class="frow"><div class="fic">${I('wheel',22)}</div><div class="flabel"><div class="l">Best lens is</div></div>
-      <div class="fctl"><select id="w-${p}-type">${opt(['','Plus','Minus','Neither'],e.lensType,{'':'Select…','Neither':'Neither helps vision'})}</select></div></div>
+    <div class="frow" id="w-${p}-type-row"><div class="fic">${I('wheel',22)}</div><div class="flabel"><div class="l">Best lens is <span class="req-mark" aria-hidden="true">*</span></div></div>
+      <div class="fctl"><select id="w-${p}-type" required aria-required="true">${opt(['','Plus','Minus','Neither'],e.lensType,{'':'Select…','Neither':'Neither helps vision'})}</select></div></div>
     <div class="frow" id="w-${p}-sph-wrap" style="display:${(e.lensType==='Plus'||e.lensType==='Minus')?'flex':'none'}"><div class="fic">${I('lens',22)}</div>
-      <div class="flabel"><div class="l">Spherical component</div></div>
-      <div class="fctl"><select id="w-${p}-sph">${opt(LENS_POWERS,e.spherePower,{'':'—'})}</select></div></div>
-    <div class="frow"><div class="fic" style="background:linear-gradient(90deg,#d23b4e 50%,#2bb56a 50%)">${I('eye',22)}</div><div class="flabel"><div class="l">Two-colour test</div><div class="h">Which side looks sharper / darker?</div></div>
-      <div class="fctl"><select id="w-${p}-colour">${opt(['','Red','Green','Same'],e.colourTestResult,{'':'Select…','Red':'Red side clearer','Green':'Green side clearer','Same':'Look the same'})}</select></div></div>
-    <div class="frow"><div class="fic">${I('check',22)}</div><div class="flabel"><div class="l">Can read line 9 or smaller now?</div></div>
-      <div class="fctl"><div class="seg" id="w-${p}-read9">${['Yes','No'].map(o=>`<button data-v="${o}" class="${e.canReadLine9OrSmaller===(o==='Yes')?'on':''}">${o}</button>`).join('')}</div></div></div>
-    <div class="frow"><div class="fic">${I('glasses',22)}</div><div class="flabel"><div class="l">Vision improved at the Wheel?</div></div>
-      <div class="fctl"><div class="seg" id="w-${p}-improved">${['Yes','No'].map(o=>`<button data-v="${o}" class="${e.visionImproved===(o==='Yes')?'on':''}">${o}</button>`).join('')}</div></div></div>
-    <div class="frow"><div class="fic">${I('lens',22)}</div><div class="flabel"><div class="l">Add-on lens needed?</div><div class="h">Only when the prescription exceeds the wheel's range</div></div>
-      <div class="fctl"><div class="seg" id="w-${p}-addon">${['Yes','No'].map(o=>`<button data-v="${o}" class="${(o==='Yes')===addonOn?'on':''}">${o}</button>`).join('')}</div></div></div>
+      <div class="flabel"><div class="l">Spherical component <span class="req-mark" aria-hidden="true">*</span></div></div>
+      <div class="fctl"><select id="w-${p}-sph" required aria-required="true">${opt(['',...LENS_POWERS],e.spherePower,{'':'Select power'})}</select></div></div>
+    <div class="frow" id="w-${p}-colour-row"><div class="fic" style="background:linear-gradient(90deg,#d23b4e 50%,#2bb56a 50%)">${I('eye',22)}</div><div class="flabel"><div class="l">Two-colour test <span class="req-mark" aria-hidden="true">*</span></div><div class="h">Which side looks sharper / darker?</div></div>
+      <div class="fctl"><select id="w-${p}-colour" required aria-required="true">${opt(['','Red','Green','Same'],e.colourTestResult,{'':'Select…','Red':'Red side clearer','Green':'Green side clearer','Same':'Look the same'})}</select></div></div>
+    <div class="frow" id="w-${p}-read9-row"><div class="fic">${I('check',22)}</div><div class="flabel"><div class="l">Can read line 9 or smaller now? <span class="req-mark" aria-hidden="true">*</span></div></div>
+      <div class="fctl"><div class="seg" id="w-${p}-read9" role="group" aria-required="true">${['Yes','No'].map(o=>`<button data-v="${o}" class="${e.canReadLine9OrSmaller===(o==='Yes')?'on':''}">${o}</button>`).join('')}</div></div></div>
+    <div class="frow" id="w-${p}-improved-row"><div class="fic">${I('glasses',22)}</div><div class="flabel"><div class="l">Vision improved at the Wheel? <span class="req-mark" aria-hidden="true">*</span></div></div>
+      <div class="fctl"><div class="seg" id="w-${p}-improved" role="group" aria-required="true">${['Yes','No'].map(o=>`<button data-v="${o}" class="${e.visionImproved===(o==='Yes')?'on':''}">${o}</button>`).join('')}</div></div></div>
+    <div class="frow" id="w-${p}-addon-row"><div class="fic">${I('lens',22)}</div><div class="flabel"><div class="l">Add-on lens needed? <span class="req-mark" aria-hidden="true">*</span></div><div class="h">Only when the prescription exceeds the wheel's range</div></div>
+      <div class="fctl"><div class="seg" id="w-${p}-addon" role="group" aria-required="true">${['Yes','No'].map(o=>`<button data-v="${o}" class="${(o==='Yes')===addonOn?'on':''}">${o}</button>`).join('')}</div></div></div>
     <div class="frow" id="w-${p}-addonpow-wrap" style="display:${addonOn?'flex':'none'}"><div class="fic">${I('lens',22)}</div>
-      <div class="flabel"><div class="l">Add-on power</div></div>
-      <div class="fctl"><select id="w-${p}-addonpow">${opt(LENS_POWERS,e.addOnPower,{'':'—'})}</select></div></div>
-    <div class="frow"><div class="fic">${I('wheel',22)}</div><div class="flabel"><div class="l">Toric correction improves vision?</div><div class="h">Optional — only when it helps</div></div>
+      <div class="flabel"><div class="l">Add-on power <span class="req-mark" aria-hidden="true">*</span></div></div>
+      <div class="fctl"><select id="w-${p}-addonpow" required aria-required="true">${opt(['',...LENS_POWERS],e.addOnPower,{'':'Select power'})}</select></div></div>
+    <div class="frow" id="w-${p}-toric-row"><div class="fic">${I('wheel',22)}</div><div class="flabel"><div class="l">Toric correction improves vision?</div><div class="h">Optional — only when it helps</div></div>
       <div class="fctl"><div class="seg" id="w-${p}-toric">${['Yes','No'].map(o=>`<button data-v="${o}" class="${(o==='Yes')===toricOn?'on':''}">${o}</button>`).join('')}</div></div></div>
     <div id="w-${p}-toric-wrap" style="display:${toricOn?'block':'none'}">
       ${fieldNumber('wheel','Toric axis (0–180°)',null,'w-'+p+'-toricaxis',e.toricAxis,0,180)}
       <div class="frow"><div class="fic">${I('lens',22)}</div><div class="flabel"><div class="l">Toric power</div></div>
-        <div class="fctl"><select id="w-${p}-toricpow">${opt(LENS_POWERS,e.toricPower,{'':'—'})}</select></div></div>
+        <div class="fctl"><select id="w-${p}-toricpow">${opt(['',...LENS_POWERS],e.toricPower,{'':'Select power'})}</select></div></div>
     </div>`;
 }
 function readEyeForm(p){
@@ -1853,13 +2033,18 @@ function readEyeForm(p){
   const colourTestResult=$('#w-'+p+'-colour').value;
   const read9=segVal('w-'+p+'-read9'), improved=segVal('w-'+p+'-improved');
   const addonV=segVal('w-'+p+'-addon'), toricV=segVal('w-'+p+'-toric');
-  if(!lensType || !colourTestResult || !read9 || !improved || !addonV || !toricV) return {error:'Complete every field for this eye'};
-  if((lensType==='Plus'||lensType==='Minus') && !$('#w-'+p+'-sph').value) return {error:'Select the spherical component'};
+  if(!lensType) return {error:'Complete every field for this eye', field:'type'};
+  if(!colourTestResult) return {error:'Complete every field for this eye', field:'colour'};
+  if(!read9) return {error:'Complete every field for this eye', field:'read9'};
+  if(!improved) return {error:'Complete every field for this eye', field:'improved'};
+  if(!addonV) return {error:'Complete every field for this eye', field:'addon'};
+  if(!toricV) return {error:'Complete every field for this eye', field:'toric'};
+  if((lensType==='Plus'||lensType==='Minus') && !$('#w-'+p+'-sph').value) return {error:'Select the spherical component', field:'sph-wrap'};
   const addOnUsed=addonV==='Yes';
-  if(addOnUsed && !$('#w-'+p+'-addonpow').value) return {error:'Select the add-on power'};
+  if(addOnUsed && !$('#w-'+p+'-addonpow').value) return {error:'Select the add-on power', field:'addonpow-wrap'};
   const toricUsed=toricV==='Yes';
   const toricAxis=toricUsed?+$('#w-'+p+'-toricaxis').value:null;
-  if(toricUsed && (!$('#w-'+p+'-toricpow').value || !Number.isInteger(toricAxis) || toricAxis<0 || toricAxis>180)) return {error:'Toric power and axis (0–180°) are required'};
+  if(toricUsed && (!$('#w-'+p+'-toricpow').value || !Number.isInteger(toricAxis) || toricAxis<0 || toricAxis>180)) return {error:'Toric power and axis (0–180°) are required', field:'toric-wrap'};
   const eye={
     lensType, spherePower:(lensType==='Plus'||lensType==='Minus')?$('#w-'+p+'-sph').value:null,
     addOnUsed, addOnPower:addOnUsed?$('#w-'+p+'-addonpow').value:null,
@@ -1875,8 +2060,8 @@ async function saveWheel(){
   const pd=+$('#w-pd').value;
   if(!(pd>=52&&pd<=78)){ toast('PD must be between 52 and 78','warn'); return; }
   const r=readEyeForm('r'), l=readEyeForm('l');
-  if(r.error){ toast('Right eye: '+r.error,'warn'); return; }
-  if(l.error){ toast('Left eye: '+l.error,'warn'); return; }
+  if(r.error){ toast('Right eye: '+r.error,'warn'); if(r.field) markFieldInvalid('w-r-'+r.field,r.error); return; }
+  if(l.error){ toast('Left eye: '+l.error,'warn'); if(l.field) markFieldInvalid('w-l-'+l.field,l.error); return; }
   s.wheel={ pd, right:r.eye, left:l.eye, testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime() };
   s.version++; s._stepLabel='Wheel test done'; await recordBackendEvent('Wheel', s, 'Wheel'); advance(s);
 }
@@ -1896,6 +2081,7 @@ function ScreenPaddle(){
     <button class="back" onclick="backToBase()">${I('back',18,'#a7add9')} Back</button>
     ${stepper('Paddle', s)}
     <div class="savebanner">${I('cloud',30,'#1cc3d6')}<div><div class="t">Paddle test · preferred reading power</div><div class="s">Required because Near vision failed</div></div></div>
+    ${requiredNote()}
 
     ${instructionCard(nearPaddleGraphic(),'Find the preferred reading power','While looking through the wheel lenses (if used) at the near vision chart, use the paddle to find the reading power the client prefers.')}
 
@@ -1906,11 +2092,11 @@ function ScreenPaddle(){
 
     <div class="vfield">
       <div class="vhead"><div class="fic">${I('paddle',22)}</div><div class="l">Client's preferred power (if different)</div></div>
-      <div class="vctl"><select id="p-pref" class="full">${opt(PADDLE_POWERS,p.clientPreference,{'':'Same as suggestion / none stated'})}</select></div>
+      <div class="vctl"><select id="p-pref" class="full">${opt(['',...PADDLE_POWERS],p.clientPreference,{'':'Same as suggestion / none stated'})}</select></div>
     </div>
-    <div class="vfield">
-      <div class="vhead"><div class="fic">${I('check',22)}</div><div class="l">Final selected power (tester confirms)</div></div>
-      <div class="vctl"><select id="p-power" class="full">${opt(PADDLE_POWERS,p.selectedPower,{'':'Choose final power…'})}</select></div>
+    <div class="vfield" id="p-power-row">
+      <div class="vhead"><div class="fic">${I('check',22)}</div><div class="l">Final selected power (tester confirms) <span class="req-mark" aria-hidden="true">*</span></div></div>
+      <div class="vctl"><select id="p-power" class="full" required aria-required="true">${opt(['',...PADDLE_POWERS],p.selectedPower,{'':'Select result'})}</select></div>
     </div>
     <div class="hint">The client's preference always overrides the age suggestion. The final power shown above is what will be dispensed.</div>
 
@@ -1924,7 +2110,7 @@ function ScreenPaddle(){
 async function savePaddle(){
   const s=state.sessions[state.activeId]; if(!canCompleteStep(s,'Paddle')){ backToBase(); return; }
   const selectedPower=$('#p-power').value, clientPreference=$('#p-pref').value||null;
-  if(!selectedPower){ toast('Confirm the final selected reading power','warn'); return; }
+  if(!selectedPower){ toast('Confirm the final selected reading power','warn'); markFieldInvalid('p-power','Select the final power.'); return; }
   const ageBand=(s.intake||{}).ageBand, sug=suggestPaddlePower(ageBand);
   s.paddle={
     ageBand, suggestedPower:sug.power, suggestionNote:sug.note,
@@ -1989,8 +2175,8 @@ function ScreenDispense(){
     <div class="hint">Spherical total = sphere + add-on power. Toric power/axis are kept as separate components — the full best-lens combination formula is not in the supplied source and is not fabricated here.</div>`:''}
 
     ${finalised?`<div class="frow"><div class="fic">${I('note',22)}</div><div class="flabel"><div class="l">Frame size / colour</div><div class="h">${d.frameSize||'—'} ${d.frameColour?'· '+d.frameColour:''}</div></div></div>`
-      : `${fieldSelect('note','Frame size (optional)',null,'dp-size',['','Small','Medium','Large'],d.frameSize)}
-         ${fieldSelect('note','Frame colour (optional)',null,'dp-colour',['','Black','Tortoise','Blue','Clear','Other'],d.frameColour)}`}
+      : `${fieldSelect('note','Frame size (optional)',null,'dp-size',['Small','Medium','Large'],d.frameSize,'No preference',false)}
+         ${fieldSelect('note','Frame colour (optional)',null,'dp-colour',['Black','Tortoise','Blue','Clear','Other'],d.frameColour,'No preference',false)}`}
 
     <div class="card qrcard" onclick="showHandoverQR('${s.id}')">
       <div class="ic sq" style="background:var(--chip);width:54px;height:54px">${I('qrshow',28)}</div>
@@ -2041,12 +2227,19 @@ function ScreenSync(){
     ${navBar('home')}
     <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync queue</h1><p>Checking pending records…</p></div></div>
   </div>`;
-  window.OOXII_SYNC.getSyncStatus().then(renderSyncStatus);
+  window.OOXII_SYNC.getSyncStatus().then((s)=>{ cachedSyncStatus=s; updateSyncPills(); renderSyncStatus(s); });
 }
+/* Each row is a DISJOINT bucket — every locally queued event falls into
+   exactly one, never more than one (see getSyncStatus() in
+   js/sync-service.js for the exact definitions). Previously "Pending"
+   double-counted every retry-needed event (it was pendingEvents.length,
+   which already included them), so a single stuck event could show as
+   both "Pending: 1" and "Failed (retrying): 1" at once. */
 function renderSyncStatus(status){
   const rows=[
     ['Pending', status.pendingCount, 's-waiting', '#f5b945'],
-    ['Failed (retrying)', status.failedCount, 's-error', '#f06a7a'],
+    ['Syncing now', status.syncingCount, 's-ready', '#1cc3d6'],
+    ['Retry needed', status.retryCount, 's-error', '#f06a7a'],
     ['Conflicts needing review', status.conflictedCount, 's-blocked', '#f06a7a'],
   ];
   screenEl().innerHTML=`<div class="pad pb">
@@ -2060,14 +2253,27 @@ function renderSyncStatus(status){
         <div class="val"><span class="statpill ${cls}"><span class="dot" style="background:${dot}"></span>${n}</span></div></div>`).join('')}
     </div>
     ${status.conflictedCount?`<div class="hint">Conflicts are never auto-resolved — a coordinator reviews them in Supabase (sync_conflicts table).</div>`:''}
-    <button class="btn btn-primary" style="margin-top:14px" onclick="manualSyncNow()">${I('cloud',22)} Sync now</button>
+    ${(()=>{
+      const hasWork = status.pendingCount>0 || status.retryCount>0;
+      const disabled = !navigator.onLine || !hasWork || status.syncingCount>0;
+      const label = status.syncingCount>0 ? 'Syncing…' : (!navigator.onLine ? 'Offline — cannot sync now' : (!hasWork ? 'Nothing to sync' : 'Sync now'));
+      return `<button class="btn btn-primary" style="margin-top:14px" ${disabled?'disabled':''} onclick="manualSyncNow()">${I('cloud',22)} ${label}</button>`;
+    })()}
     ${privacy()}
   </div>`;
 }
+let manualSyncInFlight=false;
 async function manualSyncNow(){
   if(!navigator.onLine){ toast('No internet connection right now','warn'); return; }
+  if(manualSyncInFlight) return; // the button already reflects "Syncing…"/disabled, but guard against a stale click queued just before re-render
+  manualSyncInFlight=true;
   toast('Syncing…','cloud');
-  const r=await window.OOXII_SYNC.syncNow();
+  let r;
+  try{
+    r=await window.OOXII_SYNC.syncNow();
+  } finally {
+    manualSyncInFlight=false;
+  }
   if(r.ok){ toast(r.pushed+' record'+(r.pushed===1?'':'s')+' synced'); }
   else if(r.reason==='session_expired'){ toast('Your session expired — sign in online again','warn'); }
   else if(r.reason==='already_running_elsewhere'){ toast('Sync is already running in another OOXii tab.','warn'); }
@@ -2196,6 +2402,7 @@ function searchResultCard(s, syncStatus){
       ${ctxCell('Last completed',lastCompletedStation(s))}
       ${ctxCell('Your station',activeContextLabel())}
     </div>
+    <button class="btn btn-secondary" style="margin-top:14px" onclick="showHandoverQR('${s.id}')">${I('qrshow',20,'#fff')} Show latest QR</button>
     ${syncStatus==='conflicted'?`<div class="notice" style="margin:14px 0 0"><span class="x">${I('warn',20,'#f06a7a')}</span>
         <div><div class="t">Sync conflict</div><div class="s">This client has a conflict awaiting coordinator review — data shown may not be current. See BACKEND_TEST_PLAN.md.</div></div></div>`:''}
     ${canOpen
@@ -2983,7 +3190,8 @@ async function showHandoverQR(id, after){
   scrim(`<div class="modal" style="max-width:380px">
     <h3>Handover QR</h3>
     <div class="id-big">${s.id}</div>
-    <p>Next step: <b style="color:#fff">${stepLabel(DE.getNextRequiredStep(s))}</b><br>Scan on the next station's device to continue.</p>
+    <p>Last completed: <b style="color:#fff">${lastCompletedStation(s)}</b> · Updated ${s.time||'—'}<br>
+    Next step: <b style="color:#fff">${stepLabel(DE.getNextRequiredStep(s))}</b><br>Scan on the next station's device to continue.</p>
     <div class="qrbox" id="qr-target"></div>
     <p style="font-size:12px;margin-top:0">No personal data — anonymous clinical workflow only.</p>
     <button class="btn btn-primary" onclick="closeScrim();${after?'__qrAfter()':''}">Done</button>
@@ -3100,20 +3308,58 @@ function instructionCard(graphic, title, body){
 }
 
 /* ============================ field builders ============================ */
-function fieldSelect(icon,label,help,id,options,val){
-  return `<div class="frow"><div class="fic">${I(icon,22)}</div>
-    <div class="flabel"><div class="l">${label}</div>${help?`<div class="h">${help}</div>`:''}</div>
-    <div class="fctl"><select id="${id}">${opt(options,val,{'':'Select…'})}</select></div></div>`;
+/* `opt()` only ever emits one <option> per entry already IN `options` — it
+   never invents a blank one. Every fieldSelect() caller used to rely on a
+   `{'':'Select…'}` label override that silently did nothing unless the
+   caller ALSO happened to put '' in their own options array (a few did,
+   most didn't) — with no option marked selected, the browser defaults to
+   selecting the FIRST real value, so an untouched dropdown could silently
+   carry a real clinical answer. fieldSelect() now always renders its own
+   disabled placeholder option regardless of what `options` contains, and
+   strips any stray '' the caller still passes so it's never duplicated. */
+/* required=true by default (most clinical fields are); pass false explicitly
+   for genuinely optional fields (frame size/colour, paddle's stated
+   preference) — never the other way round. The asterisk is never the only
+   indicator: the field also carries a real `required`/`aria-required`
+   attribute, and saveXxx()'s existing validation is what actually blocks
+   the save (see markFieldInvalid()). */
+function fieldSelect(icon,label,help,id,options,val,placeholder,required=true){
+  const ph = placeholder || 'Select an option';
+  const hasVal = val!=null && val!=='';
+  const clean = options.filter(o=>o!=='');
+  return `<div class="frow" id="${id}-row"><div class="fic">${I(icon,22)}</div>
+    <div class="flabel"><div class="l">${label}${required?' <span class="req-mark" aria-hidden="true">*</span>':''}</div>${help?`<div class="h">${help}</div>`:''}</div>
+    <div class="fctl"><select id="${id}" ${required?'required aria-required="true"':''}><option value="" ${hasVal?'':'selected'} disabled>${ph}</option>${opt(clean,val)}</select></div></div>`;
 }
-function fieldSeg(icon,label,help,id,options,val){
-  return `<div class="frow"><div class="fic">${I(icon,22)}</div>
-    <div class="flabel"><div class="l">${label}</div>${help?`<div class="h">${help}</div>`:''}</div>
-    <div class="fctl"><div class="seg" id="${id}">${options.map(o=>`<button data-v="${o}" class="${val===o?'on':''}">${o}</button>`).join('')}</div></div></div>`;
+function fieldSeg(icon,label,help,id,options,val,required=true){
+  return `<div class="frow" id="${id}-row"><div class="fic">${I(icon,22)}</div>
+    <div class="flabel"><div class="l">${label}${required?' <span class="req-mark" aria-hidden="true">*</span>':''}</div>${help?`<div class="h">${help}</div>`:''}</div>
+    <div class="fctl"><div class="seg" id="${id}" role="group" ${required?'aria-required="true"':''}>${options.map(o=>`<button data-v="${o}" class="${val===o?'on':''}">${o}</button>`).join('')}</div></div></div>`;
 }
-function fieldNumber(icon,label,help,id,val,min,max){
-  return `<div class="frow"><div class="fic">${I(icon,22)}</div>
-    <div class="flabel"><div class="l">${label}</div>${help?`<div class="h">${help}</div>`:''}</div>
-    <div class="fctl"><input id="${id}" type="number" min="${min}" max="${max}" value="${val||''}" style="width:96px;text-align:center"></div></div>`;
+/* Highlights the given field row (by the id passed to fieldSelect/fieldSeg/
+   fieldNumber) with a red outline + inline message — the toast already
+   names what's missing; this points at exactly which control it is.
+   Clears itself the next time that control is used. */
+/* Looks for `${id}-row` first (fieldSelect/fieldSeg/fieldNumber's own
+   wrapper), falling back to a plain `${id}` element — a few hand-built
+   conditional wrappers (e.g. the Wheel's *-wrap show/hide containers) are
+   already addressable by that exact id and must not be renamed, since
+   other code toggles their visibility by it. */
+function markFieldInvalid(id, msg){
+  const row = document.getElementById(id+'-row') || document.getElementById(id);
+  if(!row) return;
+  row.classList.add('field-invalid');
+  let m = row.querySelector('.field-invalid-msg');
+  if(!m){ m = document.createElement('div'); m.className='field-invalid-msg'; (row.querySelector('.flabel, .vhead')||row).appendChild(m); }
+  m.textContent = msg || 'This field is required.';
+  const clear = ()=>{ row.classList.remove('field-invalid'); if(m) m.remove(); };
+  const ctl = row.querySelector('select, .seg, input');
+  if(ctl) ctl.addEventListener(ctl.tagName==='SELECT'||ctl.tagName==='INPUT'?'change':'click', clear, {once:true});
+}
+function fieldNumber(icon,label,help,id,val,min,max,required=true){
+  return `<div class="frow" id="${id}-row"><div class="fic">${I(icon,22)}</div>
+    <div class="flabel"><div class="l">${label}${required?' <span class="req-mark" aria-hidden="true">*</span>':''}</div>${help?`<div class="h">${help}</div>`:''}</div>
+    <div class="fctl"><input id="${id}" type="number" min="${min}" max="${max}" value="${val||''}" style="width:96px;text-align:center" ${required?'required aria-required="true"':''}></div></div>`;
 }
 /* stacked: chart glyph + label on top, full-width line dropdown below, eye colour-coded.
    Chart lines 0 (top, largest) to 11 (bottom, smallest) per the authoritative table. */
