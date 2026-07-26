@@ -98,7 +98,18 @@
 // already on v11 (see the v6 note above for why). No schema/migration
 // change required — client-side only. Same controlled, tester-consented
 // activation as every version above.
-const CACHE_VERSION = 'v12';
+//
+// v13: fixes v12 treating EVERY station save as a handover, including
+// Distance -> Near (same station — STEP_STATION.Near='Distance'), which
+// wrongly locked the sending device out of a step it should have
+// continued into directly. finishStationTask() now calls the new
+// isCrossStationHandover() — compares the station actually active right
+// now against the station the NEXT required step needs (the same
+// STEP_STATION mapping getRequiredStation() already used) — instead of
+// treating "not individual mode" alone as reason enough to lock. Only
+// index.html changed. No schema/migration change required. Same
+// controlled, tester-consented activation as every version above.
+const CACHE_VERSION = 'v13';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 

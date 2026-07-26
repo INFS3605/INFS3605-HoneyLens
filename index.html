@@ -962,6 +962,26 @@ function canActiveTesterOpenSession(s){
 function isSessionWritable(s){
   return !(s && s._handover && s._handover.writable===false);
 }
+/* The single place that decides whether finishing a step is a real
+   cross-station handover or a same-station continuation — compares the
+   station this device is actually working at right now against the
+   station STEP_STATION says the NEXT required step belongs to (the same
+   authoritative mapping getRequiredStation() already uses — Near maps to
+   'Distance', so Distance -> Near is same-station by construction; Wheel
+   and Paddle map to their own distinct stations, so either -> the other
+   is a real handover). Never re-derive this per call site with an ad hoc
+   `nextStep !== currentStep` check — step identity is NOT the same
+   question as station identity (that's exactly the bug this fixes: every
+   save used to be treated as a handover just because there WAS a next
+   step, regardless of whether it needed a different station). No active
+   station (shouldn't happen once a real save has already been gated by
+   canActiveTesterOpenSession, but defensive) falls back to treating it as
+   a handover — the safer default. */
+function isCrossStationHandover(s){
+  const current = getActiveTesterStation();
+  if(!current) return true;
+  return current !== getRequiredStation(s);
+}
 function handoverStatusLabel(s){
   if(isSessionWritable(s)) return null;
   if(s.status==='Finalised') return 'Finished — results are locked';
@@ -3344,10 +3364,10 @@ async function showHandoverQR(id, after, opts){
   // so the 280px QR + its .qrbox padding fits without cropping — see
   // js/qr-service.js's QR_SIZE_PX.
   scrim(`<div class="modal" style="max-width:380px">
-    <h3>Handover QR</h3>
+    <h3>${isHandoff?'Handover QR':'Saved · Client QR'}</h3>
     <div class="id-big">${s.id}</div>
     <p>Last completed: <b style="color:#fff">${lastCompletedStation(s)}</b> · Updated ${s.time||'—'}<br>
-    Next step: <b style="color:#fff">${stepLabel(DE.getNextRequiredStep(s))}</b><br>Scan on the next station's device to continue.</p>
+    Next step: <b style="color:#fff">${stepLabel(DE.getNextRequiredStep(s))}</b><br>${isHandoff?'Scan on the next station\'s device to continue.':'You continue with this client on this device.'}</p>
     ${isHandoff?(provisional
       ?`<div class="notice warn" style="margin:10px 0"><span class="x">${I('cloud',20,'#f5b945')}</span><div><div class="t">Saved on this device</div><div class="s">No connection right now — client information is saved here and can still be passed to the next station. It will finish saving once a device reconnects.</div></div></div>`
       :`<div class="notice" style="margin:10px 0;background:rgba(74,222,128,.1);border-color:rgba(74,222,128,.3)"><span class="x">${I('check',20,'#4ade80')}</span><div><div class="t">Saved and confirmed</div><div class="s">This client's information is saved and up to date.</div></div></div>`
@@ -3652,7 +3672,11 @@ function finishStationTask(s,label,after){
   const r=awardHoney();
   const cont=()=>honeyAfterSave(r,label, after || (()=>afterStationSave(s)));
   if(isIndividualMode()) cont();
-  else showHandoverQR(s.id, cont, {isHandoff:true});
+  // The QR is still shown either way (existing, expected checkpoint UX) —
+  // isHandoff only decides whether it ALSO gates on sync/locks the sender.
+  // A same-station continuation (e.g. Distance -> Near, both 'Distance')
+  // must never lock; only a genuine cross-station handover does.
+  else showHandoverQR(s.id, cont, {isHandoff:isCrossStationHandover(s)});
 }
 
 /* advance after a station save: generate QR, then route ONLY where the active
