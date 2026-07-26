@@ -943,9 +943,74 @@ function getRequiredStation(s){
 }
 function canActiveTesterOpenSession(s){
   if(!s) return false;
+  if(!isSessionWritable(s)) return false; // handed off to another station — must be explicitly reopened first
   if(isIndividualMode()) return true; // no station gate — step order still enforced by guardStep
   const st = getActiveTesterStation();
   return !!st && DE.canOpenStep(s, st);
+}
+
+/* ============================ STATION HANDOVER (QR handover ownership) ============================ */
+/* A session handed to the next station via a real QR handover is locked to
+   further edits on THIS device until explicitly reopened — see
+   showHandoverQR()/finishStationTask() (where the lock is set) and
+   reopenHandedOffSession() (the only way to clear it). Individual Testing
+   mode never sets this (finishStationTask() skips the handover step there
+   entirely), so a solo tester is never affected by any of this. `s._handover`
+   is local bookkeeping only — never sent to the server as clinical payload
+   (stripped before persistAndQueue()'s payload is built, same treatment as
+   `_serverId`/`_lastEventId`). */
+function isSessionWritable(s){
+  return !(s && s._handover && s._handover.writable===false);
+}
+function handoverStatusLabel(s){
+  if(isSessionWritable(s)) return null;
+  if(s.status==='Finalised') return 'Finished — results are locked';
+  const to = s._handover.handedOffToStation ? stationLabel(s._handover.handedOffToStation) : 'the next station';
+  return 'Handed to '+to;
+}
+function showHandedOffModal(s){
+  const finalised = s.status==='Finalised';
+  const to = s._handover && s._handover.handedOffToStation ? stationLabel(s._handover.handedOffToStation) : 'the next station';
+  scrim(`<div class="modal">
+    <div class="ic sq" style="background:rgba(120,131,210,.14);border:1px solid rgba(154,164,228,.35);width:60px;height:60px;margin:0 auto 12px">${I('qrshow',28,'#9aa4e4')}</div>
+    <h3>${finalised?'Client already finished':'Client already handed over'}</h3>
+    <div class="id-big">${s.id}</div>
+    ${finalised
+      ?`<p>This client's testing is already finished and the results are locked. Contact a coordinator if something needs correcting.</p>`
+      :`<p>This client was handed to <b style="color:#fff">${to}</b>. Reopen only if you need to correct a previous result.</p>
+        <button class="btn btn-primary" onclick="closeScrim();reopenHandedOffSession('${s.id}')">Reopen to correct</button>`}
+    <button class="btn btn-secondary" onclick="closeScrim()">Close</button>
+  </div>`);
+}
+/* The only way to clear a handover lock. Checks for the latest saved
+   information first (when online) so a correction never starts from an
+   out-of-date copy of the client's results — never just resumes the old
+   local copy blindly. A client whose results are already finished is never
+   reopened for a normal edit here; that needs a coordinator. */
+async function reopenHandedOffSession(id){
+  const s=state.sessions[id]; if(!s) return;
+  if(s.status==='Finalised'){ showHandedOffModal(s); return; }
+  if(navigator.onLine && window.OOXII_SYNC && window.OOXII_SYNC.fetchAuthoritativeSession && s._serverId){
+    toast('Checking for the latest saved information…');
+    try{
+      const row = await window.OOXII_SYNC.fetchAuthoritativeSession(s._serverId);
+      if(row){
+        if(row.status==='Finalised'){
+          await window.OOXII_SYNC.applyServerSnapshot(s.id, row);
+          showHandedOffModal(state.sessions[id]);
+          return;
+        }
+        if((row.version||0) > (s.version||0)){
+          await window.OOXII_SYNC.applyServerSnapshot(s.id, row);
+        }
+      }
+    }catch(e){ console.error('[OOXii] Could not check the latest saved information before reopening', id, e); }
+  }
+  const fresh=state.sessions[id];
+  fresh._handover = Object.assign({}, fresh._handover, {writable:true});
+  if(window.OOXII_DB) await window.OOXII_DB.sessions.put(fresh);
+  toast('Client reopened. Continue when ready.');
+  openSessionForActiveStation(fresh);
 }
 /* queue entries whose next required station matches the active station */
 function getClientsForActiveStation(){
@@ -969,6 +1034,7 @@ function getCompletedAtActiveStation(){
 }
 /* the ONLY way any UI path may open a client's workflow screen */
 function openSessionForActiveStation(s){
+  if(s && !isSessionWritable(s)){ showHandedOffModal(s); return false; }
   if(!canActiveTesterOpenSession(s)){ showWrongStationModal(s); return false; }
   state.activeId = s.id;
   go(()=>routeToStep(s));
@@ -986,6 +1052,7 @@ function backToBase(){ go(baseScreen()); }
 function guardStep(step){
   const s = state.activeId ? state.sessions[state.activeId] : null;
   if(!s){ go(ScreenHome); return null; }
+  if(!isSessionWritable(s)){ go(baseScreen()); showHandedOffModal(s); return null; }
   if(!canActiveTesterOpenSession(s)){ go(baseScreen()); showWrongStationModal(s); return null; }
   if(!canEnterStep(s, step)){ routeToStep(s); return null; } // auto-correct to the required step
   return s;
@@ -2385,15 +2452,18 @@ function lastCompletedStation(s){
 }
 function searchResultCard(s, syncStatus){
   const req=getRequiredStation(s);
-  const canOpen=canActiveTesterOpenSession(s);
+  const writable=isSessionWritable(s);
+  const canOpen=writable && canActiveTesterOpenSession(s);
   const active=getActiveTesterStation();
   const nextTxt = stepLabel(getRequiredStep(s));
   const [syncLabel, syncCls] = SYNC_STATUS_LABEL[syncStatus] || ['Local only','s-offline'];
+  const handoverLabel = handoverStatusLabel(s);
   return `<div class="card" style="padding:18px">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <div class="readout" style="font-size:20px;min-width:auto">${s.id}</div>
       <span class="statpill ${pillClass(s.status)}">${s.status}</span>
       <span class="statpill ${syncCls}">${syncLabel}</span>
+      ${handoverLabel?`<span class="statpill s-waiting">${handoverLabel}</span>`:''}
       <span class="time" style="margin-left:auto">Updated ${s.time||'—'}</span>
     </div>
     <div class="ctxgrid" style="margin-top:14px">
@@ -2405,12 +2475,19 @@ function searchResultCard(s, syncStatus){
     <button class="btn btn-secondary" style="margin-top:14px" onclick="showHandoverQR('${s.id}')">${I('qrshow',20,'#fff')} Show latest QR</button>
     ${syncStatus==='conflicted'?`<div class="notice" style="margin:14px 0 0"><span class="x">${I('warn',20,'#f06a7a')}</span>
         <div><div class="t">Sync conflict</div><div class="s">This client has a conflict awaiting coordinator review — data shown may not be current. See BACKEND_TEST_PLAN.md.</div></div></div>`:''}
-    ${canOpen
-      ?`<button class="btn btn-primary" style="margin-top:16px" onclick="openSearchResult('${s.id}')">Open client ${I('arrowR',20)}</button>`
-      :`<div class="notice" style="margin:16px 0 0"><span class="x">${I('warn',20,'#f06a7a')}</span>
-          <div><div class="t">Not for your station</div>
-          <div class="s">This client needs <b style="color:#fff">${stationLabel(req)}</b>. You are working at <b style="color:#fff">${activeContextLabel()}</b>. Please direct the client to ${stationLabel(req)}.</div></div></div>
-        <button class="btn btn-secondary" onclick="go(ScreenFestival)">Change my station</button>`}
+    ${!writable
+      ?(s.status==='Finalised'
+        ?`<div class="notice" style="margin:16px 0 0"><span class="x">${I('warn',20,'#f5b945')}</span>
+            <div><div class="t">Client already finished</div><div class="s">Results are locked. Contact a coordinator if something needs correcting.</div></div></div>`
+        :`<div class="notice" style="margin:16px 0 0"><span class="x">${I('warn',20,'#f5b945')}</span>
+            <div><div class="t">Client already handed over</div><div class="s">Reopen only if you need to correct a previous result.</div></div></div>
+          <button class="btn btn-primary" style="margin-top:16px" onclick="reopenHandedOffSession('${s.id}')">Reopen to correct</button>`)
+      :(canOpen
+        ?`<button class="btn btn-primary" style="margin-top:16px" onclick="openSearchResult('${s.id}')">Open client ${I('arrowR',20)}</button>`
+        :`<div class="notice" style="margin:16px 0 0"><span class="x">${I('warn',20,'#f06a7a')}</span>
+            <div><div class="t">Not for your station</div>
+            <div class="s">This client needs <b style="color:#fff">${stationLabel(req)}</b>. You are working at <b style="color:#fff">${activeContextLabel()}</b>. Please direct the client to ${stationLabel(req)}.</div></div></div>
+          <button class="btn btn-secondary" onclick="go(ScreenFestival)">Change my station</button>`)}
   </div>`;
 }
 
