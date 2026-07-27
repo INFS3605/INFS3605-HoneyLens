@@ -1357,17 +1357,33 @@ function refreshSyncStatusCache(){
 }
 /* Tester-facing sync language is deliberately simple — no "conflict",
    "retry", "failed", "version mismatch" or any other technical term ever
-   reaches this UI. Every locally-queued item that hasn't safely reached
-   Supabase (pending, retry-needed, OR an unresolved conflict) is folded
-   into one plain count: "waiting to sync". The underlying buckets
-   (pendingCount/retryCount/conflictedCount from getSyncStatus() in
-   js/sync-service.js) are completely unchanged — conflict detection,
-   retry/backoff, and server-snapshot reconciliation all still work
-   exactly as before; only what's DISPLAYED is collapsed. A coordinator
-   reviewing sync_conflicts directly in Supabase (or a future admin-portal
-   view) still sees the real technical picture — this simplification is
-   tester-UI-only. */
-function waitingToSyncCount(s){ return s ? (s.pendingCount + s.retryCount + s.conflictedCount) : 0; }
+   reaches this UI. But "waiting to sync" must only ever count items the
+   sync engine can actually still act on — NOT every technical bucket.
+
+   Deliberately EXCLUDES conflictedCount. Trace (js/sync-service.js,
+   pushEvent()): once an event is classified as a conflict, it is
+   `pendingEvents.remove()`d and `conflicts.put()` — moved into a
+   completely separate IndexedDB store. runSyncLoop() only ever reads
+   `pendingEvents.all()` to decide what to push; it never reads the
+   `conflicts` store, and nothing anywhere calls `conflicts.remove()`.
+   A conflicted event is therefore permanently outside what "Sync now"
+   can process — counting it as "waiting to sync" was a real bug (fixed
+   here): the tester would see a number that pressing Sync now could
+   never reduce, for something that isn't a technical failure at all —
+   it may already be fully and correctly resolved on the server (a
+   later successful event already reconciled it — see
+   applyServerSnapshot() in the conflict branch of pushEvent()), or it
+   may genuinely need a coordinator's correction, but either way it is
+   not "local data waiting to be sent."
+
+   Only pendingCount + retryCount — genuinely queued or transiently-
+   failed events the NEXT sync attempt will actually retry — count as
+   "waiting to sync". Conflicts remain fully tracked (never deleted,
+   never hidden from a coordinator reviewing sync_conflicts directly in
+   Supabase) — they just don't drive this operational, tester-facing
+   number, since nothing the tester can do here (pressing Sync now)
+   changes them. */
+function waitingToSyncCount(s){ return s ? (s.pendingCount + s.retryCount) : 0; }
 function syncPillContent(){
   if(!window.OOXII_CONFIG_VALID || isDemoModeSession()){
     return { label: state.sync.length ? state.sync.length+' waiting to sync' : 'Sync', cls: 'sy-offline' };

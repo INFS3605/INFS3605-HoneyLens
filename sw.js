@@ -172,7 +172,21 @@
 // sync_conflicts and the real technical picture remain fully intact and
 // reviewable directly in Supabase. Same controlled, tester-consented
 // activation as every version above.
-const CACHE_VERSION = 'v17';
+// v18: fixes v17's own bug. waitingToSyncCount() included
+// conflictedCount, but a conflicted event is `pendingEvents.remove()`d
+// and moved into the separate `conflicts` IndexedDB store the moment
+// pushEvent() classifies it (js/sync-service.js) — runSyncLoop() only
+// ever reads pendingEvents, never conflicts, and nothing calls
+// conflicts.remove(). So a device with only historical conflicts and no
+// genuinely queued work showed e.g. "6 items waiting to sync" even
+// though pressing "Sync now" could never change that number — confirmed
+// live against the real IndexedDB store, not just in theory. Now
+// waitingToSyncCount() = pendingCount + retryCount only; conflicts are
+// still fully preserved (never deleted) but no longer drive this
+// operational, tester-facing count. Only index.html changed. No
+// schema/migration change. Same controlled, tester-consented activation
+// as every version above.
+const CACHE_VERSION = 'v18';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
