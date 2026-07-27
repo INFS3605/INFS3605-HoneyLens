@@ -290,7 +290,17 @@
 // offline requirement, cache-busted via its own ?v= convention instead —
 // see admin/index.html's script tags). No change to clinical, sync, QR,
 // Honey-award, or auth logic.
-const CACHE_VERSION = 'v25';
+// v26 — Design-system Phase 2E (Impeccable final pass): fixed the one
+// safely-fixable detector finding from the re-run — .tier-fill (the
+// monthly-tier progress bar on the Profile screen) animated its `width`,
+// which causes layout thrash. Switched to `transform:scaleX()` with
+// transform-origin:left instead — same visual fill, same .8s easing,
+// zero functional change, just a non-layout-thrashing property.
+// Deliberately did NOT touch the other detector finding (bounce easing
+// on honeyBeeBounce, the Honey reward pop's bee animation) — kept
+// intentionally per explicit direction: it's the reward's behavioural
+// signature, not a generic decorative bounce.
+const CACHE_VERSION = 'v26';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
