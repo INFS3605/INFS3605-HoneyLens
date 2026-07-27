@@ -434,30 +434,43 @@
 
   /* ===== normal (non-milestone) "+1 Honey" reward pop =====
      Deliberately NOT a scrim()/modal — no backdrop, nothing to dismiss,
-     pointer-events:none so it can never intercept a tap. z-index sits
-     above .scrim (40) so it renders on top of a concurrently-opening
-     handover QR instead of being hidden behind (or destroyed by) it —
-     see showHoneyPop()'s comment. Auto-removes itself; ~2s total. */
-  .honey-pop{position:absolute;left:50%;top:16%;transform:translateX(-50%);
-    z-index:200;pointer-events:none;text-align:center;animation:honeyPopIn .3s ease-out}
+     pointer-events:none so it can never intercept a tap. Pinned to the
+     top-right corner of #phone, below the header's connectivity/sync
+     badges, so it never overlaps a centered .scrim modal (e.g. the
+     handover QR card) — the QR/clinical content stays fully unobstructed.
+     z-index sits above .scrim (40) so it still renders even if a
+     handover QR opens at the same moment. Auto-removes itself; ~2s total. */
+  .honey-pop{position:absolute;top:74px;right:14px;z-index:200;pointer-events:none;
+    display:flex;align-items:center;gap:8px;max-width:190px;
+    background:rgba(16,18,48,.94);border:1px solid rgba(245,185,69,.45);
+    border-radius:14px;padding:8px 12px 8px 8px;box-shadow:0 10px 26px rgba(0,0,0,.4);
+    animation:honeyPopIn .3s ease-out}
   .honey-pop.honey-pop-out{animation:honeyPopOut .3s ease-in forwards}
-  @keyframes honeyPopIn{0%{opacity:0;transform:translateX(-50%) translateY(-12px) scale(.9)}100%{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}}
-  @keyframes honeyPopOut{0%{opacity:1}100%{opacity:0;transform:translateX(-50%) translateY(-8px) scale(.94)}}
-  .honey-pop-bee{filter:drop-shadow(0 6px 14px rgba(0,0,0,.35));animation:honeyBeeBounce 1s ease-in-out}
+  @keyframes honeyPopIn{0%{opacity:0;transform:translateY(-10px) translateX(10px) scale(.9)}100%{opacity:1;transform:translateY(0) translateX(0) scale(1)}}
+  @keyframes honeyPopOut{0%{opacity:1}100%{opacity:0;transform:translateY(-6px) scale(.94)}}
+  .honey-pop-icons{position:relative;flex:0 0 auto;width:36px;height:32px}
+  .honey-pop-bee{position:absolute;left:0;top:0;filter:drop-shadow(0 4px 10px rgba(0,0,0,.35));animation:honeyBeeBounce 1s ease-in-out}
   @keyframes honeyBeeBounce{
-    0%  {transform:translateY(8px) rotate(8deg) scale(.6);opacity:0}
-    35% {transform:translateY(-9px) rotate(-6deg) scale(1.08);opacity:1}
-    58% {transform:translateY(3px) rotate(4deg) scale(1)}
-    78% {transform:translateY(-3px) rotate(-2deg) scale(1)}
+    0%  {transform:translateY(6px) rotate(8deg) scale(.6);opacity:0}
+    35% {transform:translateY(-4px) rotate(-6deg) scale(1.05);opacity:1}
+    58% {transform:translateY(1px) rotate(4deg) scale(1)}
+    78% {transform:translateY(-1px) rotate(-2deg) scale(1)}
     100%{transform:translateY(0) rotate(0deg) scale(1)}
   }
-  .honey-pop-drop{margin-top:-4px;opacity:0;animation:honeyDropPop .5s ease-out .45s both}
+  .honey-pop-drop{position:absolute;right:-2px;bottom:-2px;opacity:0;animation:honeyDropPop .5s ease-out .45s both}
   @keyframes honeyDropPop{0%{opacity:0;transform:translateY(-6px) scale(.5)}65%{opacity:1;transform:translateY(2px) scale(1.15)}100%{opacity:1;transform:translateY(0) scale(1)}}
-  .honey-pop-plus{font-size:22px;font-weight:800;color:var(--amber);margin-top:2px;
-    text-shadow:0 2px 10px rgba(0,0,0,.5);opacity:0;animation:honeyPopTextIn .35s ease-out .35s both}
-  .honey-pop-label{font-size:12px;color:var(--dim);margin-top:2px;text-shadow:0 1px 6px rgba(0,0,0,.5);
+  .honey-pop-text{min-width:0}
+  .honey-pop-plus{font-size:15px;font-weight:800;color:var(--amber);line-height:1.2;
+    opacity:0;animation:honeyPopTextIn .35s ease-out .35s both;white-space:nowrap}
+  .honey-pop-label{font-size:10.5px;color:var(--dim);line-height:1.25;margin-top:1px;
     opacity:0;animation:honeyPopTextIn .35s ease-out .5s both}
-  @keyframes honeyPopTextIn{0%{opacity:0;transform:translateY(4px)}100%{opacity:1;transform:translateY(0)}}
+  @keyframes honeyPopTextIn{0%{opacity:0;transform:translateY(3px)}100%{opacity:1;transform:translateY(0)}}
+  @media (max-width:560px){
+    .honey-pop{top:64px;right:8px;max-width:150px;padding:6px 9px 6px 6px;gap:6px}
+    .honey-pop-icons{width:30px;height:27px}
+    .honey-pop-plus{font-size:13px}
+    .honey-pop-label{font-size:9.5px}
+  }
 
   /* ===== tablet dashboard layout: persistent left sidebar + main area ===== */
   .tl-wrap{display:flex;align-items:stretch;min-height:100%}
@@ -3843,7 +3856,7 @@ function awardStationHoney(session, step){
    itself after ~2s — the tester never has to interact with it. */
 function showHoneyPop(){
   const old=document.querySelector('.honey-pop'); if(old) old.remove();
-  const bee=`<svg width="46" height="40" viewBox="0 0 52 46" aria-hidden="true">
+  const bee=`<svg width="32" height="28" viewBox="0 0 52 46" aria-hidden="true">
     <ellipse cx="14" cy="16" rx="13" ry="8" fill="rgba(210,235,255,.72)" stroke="rgba(180,220,255,.4)" stroke-width=".8" transform="rotate(-18 14 16)"/>
     <ellipse cx="38" cy="16" rx="13" ry="8" fill="rgba(210,235,255,.60)" stroke="rgba(180,220,255,.4)" stroke-width=".8" transform="rotate(18 38 16)"/>
     <ellipse cx="26" cy="29" rx="14" ry="16" fill="#f5b945"/>
@@ -3862,10 +3875,14 @@ function showHoneyPop(){
   const el=document.createElement('div');
   el.className='honey-pop';
   el.innerHTML=`
-    <div class="honey-pop-bee">${bee}</div>
-    <div class="honey-pop-drop">${honeyDropIcon(16,21,'dgPop')}</div>
-    <div class="honey-pop-plus">+1 🍯 Honey</div>
-    <div class="honey-pop-label">Client completed at your station</div>`;
+    <div class="honey-pop-icons">
+      <div class="honey-pop-bee">${bee}</div>
+      <div class="honey-pop-drop">${honeyDropIcon(11,15,'dgPop')}</div>
+    </div>
+    <div class="honey-pop-text">
+      <div class="honey-pop-plus">+1 🍯 Honey</div>
+      <div class="honey-pop-label">Client completed at your station</div>
+    </div>`;
   const host=document.getElementById('phone')||document.body;
   host.appendChild(el);
   setTimeout(()=>{

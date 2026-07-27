@@ -226,7 +226,21 @@
 // schema/migration change, no change to the station-reward accounting
 // logic itself. Same controlled, tester-consented activation as every
 // version above.
-const CACHE_VERSION = 'v20';
+// v21 — the "+1 Honey" reward pop (showHoneyPop(), v20 above) was
+// centered near the top of #phone, which visually collided with the
+// handover QR modal's centered .scrim — the pop could render over part
+// of the QR code, making it harder to scan right when a tester needed
+// it most. Repositioned to a compact badge pinned to the top-right
+// corner of #phone (below the header's connectivity/sync badges)
+// instead of centered — .scrim always centers its .modal, so a
+// corner-pinned pop sits outside that footprint on any tablet/desktop
+// width, and a narrower @media (max-width:560px) variant keeps it
+// compact on phones. pointer-events:none, z-index, dedup, and the
+// ~2.1s auto-dismiss timing are unchanged — only CSS positioning/sizing
+// and the pop's internal layout markup changed, not when or why it
+// fires. No change to award/dedup logic, QR payload, handover locking,
+// clinical routing, sync, or Supabase.
+const CACHE_VERSION = 'v21';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
