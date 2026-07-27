@@ -1161,6 +1161,26 @@ function loadHoney(){
   return h;
 }
 function saveHoney(){ try{ localStorage.setItem('hl_honey', JSON.stringify(state.honey)); }catch(e){} }
+/* Reward-identity dedup set — client + physical station + tester, exactly
+   once each. Deliberately NOT part of loadHoney()/state.honey (which resets
+   daily/monthly): a client can sit in the queue across a day boundary, and
+   "already rewarded" must never expire just because midnight passed, or a
+   tester could re-earn Honey for the same client after a date rollover.
+   Local/per-device only — this stops every same-device duplicate path
+   (reopen, re-scan, refresh, retry, correction); it does not by itself
+   prevent a genuinely different device from independently granting the
+   same (client, station, tester) reward before ever syncing — see
+   awardStationHoney()'s comment for why that's a known, separate limit. */
+function loadHoneyAwards(){
+  try{
+    const raw = JSON.parse(localStorage.getItem('hl_honey_awards'));
+    if(Array.isArray(raw)) return new Set(raw);
+  }catch(e){}
+  return new Set();
+}
+function saveHoneyAwards(){
+  try{ localStorage.setItem('hl_honey_awards', JSON.stringify(Array.from(state.honeyAwards))); }catch(e){}
+}
 const state = {
   authed:false, remember:true,
   // Auth provenance — the ONLY thing that may ever classify a session as
@@ -1178,6 +1198,7 @@ const state = {
   queue:[],
   sync:[],
   honey: loadHoney(),
+  honeyAwards: loadHoneyAwards(),
   tester:{name:'Ana Tupou',email:'ana.t@ooxii.org',testerId:'VT-0417',role:'Eye Tester',camp:'Port Vila Eye Camp',clientsTotal:3,lastHoney:null},
 };
 
@@ -1945,7 +1966,7 @@ async function saveIntake(){
   s.status='In Progress'; s.path=['Registration','Distance']; s.dir='out'; s.time=nowTime(); s.version++;
   if(!state.queue.includes(s.id)) state.queue.unshift(s.id);
   await recordBackendEvent('Registration', s, 'Registration');
-  finishStationTask(s,'Registration complete');
+  finishStationTask(s,'Registration complete',undefined,'Registration');
 }
 /* Fire-and-forget local-first persistence + sync queue hook (see
    js/backend-adapter.js). Called AFTER the decision engine + screen code
@@ -2024,7 +2045,7 @@ async function saveDistance(){
      replace the unaided pre-test result (no authoritative rule says it may) */
   s.distance={ rightUnaided:right, leftUnaided:left, hasGlasses:g==='Yes', ownGlasses:own,
     testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime() };
-  s.version++; s._stepLabel='Distance test done'; await recordBackendEvent('Distance', s, 'Distance'); advance(s);
+  s.version++; s._stepLabel='Distance test done'; await recordBackendEvent('Distance', s, 'Distance'); advance(s,'Distance');
 }
 
 /* ============================ NEAR PRE-TEST ============================ */
@@ -2083,7 +2104,7 @@ async function saveNear(){
   }
   s.near={unaided, hasReading:g==='Yes', ownGlasses:own,
     testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime()};
-  s.version++; s._stepLabel='Near test done'; await recordBackendEvent('Near', s, 'Distance'); advance(s);
+  s.version++; s._stepLabel='Near test done'; await recordBackendEvent('Near', s, 'Distance'); advance(s,'Near');
 }
 
 /* ============================ WHEEL (per eye) ============================ */
@@ -2179,7 +2200,7 @@ async function saveWheel(){
   if(r.error){ toast('Right eye: '+r.error,'warn'); if(r.field) markFieldInvalid('w-r-'+r.field,r.error); return; }
   if(l.error){ toast('Left eye: '+l.error,'warn'); if(l.field) markFieldInvalid('w-l-'+l.field,l.error); return; }
   s.wheel={ pd, right:r.eye, left:l.eye, testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime() };
-  s.version++; s._stepLabel='Wheel test done'; await recordBackendEvent('Wheel', s, 'Wheel'); advance(s);
+  s.version++; s._stepLabel='Wheel test done'; await recordBackendEvent('Wheel', s, 'Wheel'); advance(s,'Wheel');
 }
 
 /* ============================ PADDLE — preferred reading power ============================ */
@@ -2235,7 +2256,7 @@ async function savePaddle(){
     notes:$('#p-notes').value,
     testerId:state.tester.testerId, deviceId:state.device, recordedAt:nowTime()
   };
-  s.version++; s._stepLabel='Paddle test done'; await recordBackendEvent('Paddle', s, 'Paddle'); advance(s);
+  s.version++; s._stepLabel='Paddle test done'; await recordBackendEvent('Paddle', s, 'Paddle'); advance(s,'Paddle');
 }
 
 /* ============================ DISPENSE ============================ */
@@ -2319,7 +2340,7 @@ async function confirmGlasses(){
   await recordBackendEvent('Dispense', s, 'Dispense');
   // honey rewards completing the dispensing station's workflow task,
   // not the clinical outcome — the drop is earned whether or not glasses suit
-  const r=awardHoney();
+  const r=awardStationHoney(s,'Dispense');
   go(ScreenDispense);
   honeyAfterSave(r,'Dispensing task complete');
 }
@@ -2791,8 +2812,14 @@ async function confirmExit(){
   s.exit={counsellingDone:true, glassesDispensed:false, testerId:state.tester.testerId, deviceId:state.device, completedAt:nowTime()};
   s.status='Finalised'; s.version++;
   await recordBackendEvent('Exit', s, 'Exit');
-  const r=awardHoney(); // honey: admin/workflow task completion — not outcome-linked
-  honeyAfterSave(r,'Exit & counselling complete',()=>go(baseScreen()));
+  // No Honey awarded here: Exit is not a physical station (see
+  // isStationResponsibilityComplete()'s comment) — the Distance station's
+  // one reward for this client was already granted when Near determined
+  // route "none" (advance(s,'Near') -> finishStationTask -> awardStationHoney).
+  // Confirming counselling here is the tail of that same station's work,
+  // not a second completion.
+  toast('Exit & counselling complete');
+  go(baseScreen());
 }
 
 /* ============================ QR SCANNER (simulated) ============================ */
@@ -3665,8 +3692,14 @@ function stepper(current, s){
 }
 
 /* ===== Honey Rewards: earning & reward moments =====
-   Honey counts workflow-task completions (registration saved, station test saved,
-   dispensing task done, exit counselling done) — participation only, never outcomes. */
+   Honey rewards getting ONE client through the physical station the tester
+   is working at — one reward per (client, station, tester), never one per
+   clinical save/event/screen. Distance and Near share one station
+   (STEP_STATION.Near==='Distance'), so completing both is still exactly
+   one reward, earned only once the client actually leaves that station's
+   responsibility (a real handover, or a terminal outcome like Exit). See
+   awardStationHoney() — the single place this decision is made; no save
+   function may award Honey directly any more. */
 function awardHoney(){
   const h=state.honey, prev=dailyBadge(h.today);
   h.today++; h.monthClients++; state.tester.clientsTotal++;
@@ -3675,18 +3708,65 @@ function awardHoney(){
   const badge=dailyBadge(h.today);
   return {badgeUp: !!badge && badge!==prev, badge};
 }
-/* subtle by design: a quiet toast per task; the one-time animated moment is
-   reserved for daily badge upgrades so testing itself is never interrupted */
-function honeyAfterSave(r,label,after){
-  state.tester.lastHoney=label;
-  toast('+1 🍯 '+label+' · '+state.honey.today+' today');
-  if(r.badgeUp) showHoneyMilestone(r.badge, after);
-  else if(after) after();
+function honeyAwardKey(clientId, station, testerId){ return clientId+'::'+station+'::'+testerId; }
+/* True once the station responsible for `justCompletedStep` has nothing
+   left to do for this client — i.e. the NEXT required step belongs to a
+   different station, or there's no next step at all. Exit needs no special
+   case here (unlike isCrossStationHandover(), which explicitly suppresses
+   the handover LOCK for it): STEP_STATION.Exit='Exit' already differs from
+   every real station, so reaching it always correctly reads as "this
+   station's job is done" — it just never triggers a device handover
+   because isCrossStationHandover() is a separate decision. */
+function isStationResponsibilityComplete(justCompletedStep, s){
+  const next=DE.getNextRequiredStep(s);
+  if(next==='Complete') return true;
+  return STEP_STATION[next]!==STEP_STATION[justCompletedStep];
 }
-/* complete a station task: count honey, hand over, continue.
-   Individual mode: same tester keeps the client — no device handover, so no QR stop. */
-function finishStationTask(s,label,after){
-  const r=awardHoney();
+/* The ONE place Honey is ever granted. Returns {awarded, badgeUp, badge} —
+   `awarded:false` whenever the station isn't actually done yet, or this
+   exact (client, station, tester) combination was already rewarded
+   (checked against a persisted, never-expiring local set — see
+   loadHoneyAwards()'s comment). Reopening a client, rescanning/reshowing a
+   QR, retrying a sync, refreshing the browser, or correcting an
+   already-completed station all recompute the SAME key and hit this same
+   guard — none of them can grant a second reward on this device.
+   Known limitation: this dedup is local/per-device. If the exact same
+   (client, station, tester) reward could somehow be granted independently
+   on two different devices before either has synced, nothing here stops
+   both from counting locally — closing that gap for the CONFIRMED
+   Supabase total would need a server-side uniqueness constraint on
+   honey_events keyed by (client, station, tester) instead of by raw event
+   id, which is a migration and out of scope here (see the delivery
+   report). */
+function awardStationHoney(session, step){
+  if(!session || !step) return {awarded:false, badgeUp:false, badge:null};
+  if(!isStationResponsibilityComplete(step, session)) return {awarded:false, badgeUp:false, badge:null};
+  const station=STEP_STATION[step];
+  const testerId=state.tester && state.tester.testerId;
+  if(!station || !testerId) return {awarded:false, badgeUp:false, badge:null};
+  const key=honeyAwardKey(session.id, station, testerId);
+  if(state.honeyAwards.has(key)) return {awarded:false, badgeUp:false, badge:null};
+  state.honeyAwards.add(key);
+  saveHoneyAwards();
+  return Object.assign({awarded:true}, awardHoney());
+}
+/* subtle by design: a quiet toast per task; the one-time animated moment is
+   reserved for daily badge upgrades so testing itself is never interrupted.
+   When nothing new was actually awarded (see awardStationHoney()), no
+   toast, no bee, no total change — just continue the workflow. */
+function honeyAfterSave(r,label,after){
+  if(r && r.awarded){
+    state.tester.lastHoney=label;
+    toast('+1 🍯 '+label+' · '+state.honey.today+' today');
+    if(r.badgeUp){ showHoneyMilestone(r.badge, after); return; }
+  }
+  if(after) after();
+}
+/* complete a station task: award Honey ONLY if the station is now actually
+   done (see awardStationHoney()), hand over, continue. Individual mode:
+   same tester keeps the client — no device handover, so no QR stop. */
+function finishStationTask(s,label,after,step){
+  const r=awardStationHoney(s, step);
   const cont=()=>honeyAfterSave(r,label, after || (()=>afterStationSave(s)));
   if(isIndividualMode()) cont();
   // The QR is still shown either way (existing, expected checkpoint UX) —
@@ -3697,13 +3777,17 @@ function finishStationTask(s,label,after){
 }
 
 /* advance after a station save: generate QR, then route ONLY where the active
-   station is permitted — otherwise hand over and return to the station dashboard */
-function advance(s){
+   station is permitted — otherwise hand over and return to the station dashboard.
+   `step` is the canonical step key just saved ('Distance'/'Near'/'Wheel'/
+   'Paddle') — required so finishStationTask() can decide, via
+   isStationResponsibilityComplete(), whether THIS save actually finished
+   the station's work or was just a same-station checkpoint. */
+function advance(s, step){
   s.time=nowTime();
   const next=DE.getNextRequiredStep(s);
   if(!s.path.includes(next)) s.path.push(next);
   if(!state.queue.includes(s.id)) state.queue.unshift(s.id);
-  finishStationTask(s, s._stepLabel||'Station task complete');
+  finishStationTask(s, s._stepLabel||'Station task complete', undefined, step);
 }
 function afterStationSave(s){
   if(canActiveTesterOpenSession(s)) routeToStep(s); // e.g. Near follows Distance at the same station

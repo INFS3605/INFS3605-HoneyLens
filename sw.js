@@ -123,7 +123,30 @@
 // decision engine. Only index.html changed. No schema/migration change
 // required. Same controlled, tester-consented activation as every
 // version above.
-const CACHE_VERSION = 'v14';
+//
+// v15: Honey Rewards audit fix. Every clinical save (Registration,
+// Distance, Near, Wheel, Paddle) used to call awardHoney() directly via
+// finishStationTask(), so a client passing through Distance THEN Near
+// earned two separate rewards for one physical station — the same bug
+// class as v13's handover lock, just in the reward system instead. Honey
+// is now only ever granted through the single awardStationHoney(session,
+// step) function: it checks isStationResponsibilityComplete() (same
+// STEP_STATION mapping as isCrossStationHandover() — Near shares
+// Distance's station) and a persisted (client, station, tester) dedup set
+// (state.honeyAwards / localStorage 'hl_honey_awards', independent of the
+// daily/monthly counters so it never expires on a day rollover) before
+// incrementing anything. QR generation, reopening, rescanning, sync
+// retries, refreshes, and corrections all recompute the same key and hit
+// the same guard, so none of them can grant a second reward. Exit awards
+// nothing of its own (the Distance station's reward already covers it,
+// same as v14's handover fix). Individual Testing mode is unaffected in
+// principle (one reward per physical station the same tester completes)
+// — this file only changed because index.html did. No schema/migration
+// change required — this is a client-side, local-dedup fix only; the
+// confirmed Supabase honey_events total is a known, separate, unfixed gap
+// documented in the delivery report, not silently addressed here. Same
+// controlled, tester-consented activation as every version above.
+const CACHE_VERSION = 'v15';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
