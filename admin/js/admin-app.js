@@ -40,7 +40,7 @@
   function renderSignIn(errorMsg) {
     document.getElementById('gate-body').innerHTML = `
       <div class="gate-h1">Coordinator sign in</div>
-      <div class="gate-p">This portal is for OOXii coordinators only. Testers should use the main HoneyLens app.</div>
+      <div class="gate-p">This portal is for OOXii coordinators only. Testers should use the main OOXii app.</div>
       <div class="gate-err" id="gate-err" style="${errorMsg ? 'display:block' : ''}">${errorMsg ? AdminCharts.esc(errorMsg) : ''}</div>
       <div class="field"><label>Email</label><input id="si-email" type="email" placeholder="coordinator@ooxii.org" autocomplete="username"></div>
       <div class="field"><label>Password</label><input id="si-pass" type="password" placeholder="••••••••" autocomplete="current-password"></div>

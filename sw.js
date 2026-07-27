@@ -281,7 +281,16 @@
 // blank. No change to any clinical decision logic, validation rules,
 // required-field enforcement, blank-dropdown defaults, station routing,
 // QR handover, sync, Honey rewards, or auth.
-const CACHE_VERSION = 'v24';
+// v25 — Design-system Phase 2D: aligned index.html's shared input/select
+// radius to the same --ooxii-radius-sm token admin/index.html now uses
+// (11px -> 10px, a 1px value change for cross-app consistency, not a
+// layout change). The Insights Portal's own Phase 2D changes
+// (admin/index.html, admin/js/admin-app.js) are separate, non-CORE_ASSET
+// files this service worker never caches (the portal is online-only, no
+// offline requirement, cache-busted via its own ?v= convention instead —
+// see admin/index.html's script tags). No change to clinical, sync, QR,
+// Honey-award, or auth logic.
+const CACHE_VERSION = 'v25';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
