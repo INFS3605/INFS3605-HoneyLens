@@ -52,9 +52,14 @@
   }
 
   /* Same event types apply_session_event() awards Honey for — kept in sync
-     with EVENT_TYPE below and the RPC's own v_honey_types. Participation and
-     administrative task completion only; never a clinical outcome. */
-  const HONEY_ELIGIBLE_EVENT_TYPES = ['registration', 'step_saved', 'dispense_completed', 'exit_completed', 'admin_task'];
+     with EVENT_TYPE below and the RPC's own v_honey_types (see migration
+     011_station_based_honey_rewards.sql). Participation and administrative
+     task completion only; never a clinical outcome. 'exit_completed' is
+     deliberately excluded — Exit is not a physical station, and its one
+     station reward (Distance) was already counted under 'step_saved' when
+     Near (or Distance) determined the route; counting it again here would
+     preview an extra pending Honey the server will never actually confirm. */
+  const HONEY_ELIGIBLE_EVENT_TYPES = ['registration', 'step_saved', 'dispense_completed', 'admin_task'];
 
   /* "Festival-local date" — the SAME timezone the RPC uses server-side
      (festivals.timezone, default Pacific/Efate) so a client's "today" and

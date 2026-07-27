@@ -146,7 +146,21 @@
 // confirmed Supabase honey_events total is a known, separate, unfixed gap
 // documented in the delivery report, not silently addressed here. Same
 // controlled, tester-consented activation as every version above.
-const CACHE_VERSION = 'v15';
+//
+// v16: closes v15's known server-side gap. supabase/migrations/
+// 011_station_based_honey_rewards.sql corrects apply_session_event() to
+// award Honey once per (session, station, tester) — the same rule as
+// v15's client-side fix — instead of once per honey-eligible event, so
+// Distance+Near no longer create two confirmed honey_events rows.
+// js/backend-adapter.js's HONEY_ELIGIBLE_EVENT_TYPES drops
+// 'exit_completed' to match (Exit never independently confirms Honey
+// server-side any more, same as it never does locally). Requires
+// 011_station_based_honey_rewards.sql to also be applied to the Supabase
+// project — a database change, separate from this cache version, not
+// something this file can do; the tester app keeps working correctly
+// offline/locally either way, per the existing local-first design. Same
+// controlled, tester-consented activation as every version above.
+const CACHE_VERSION = 'v16';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
