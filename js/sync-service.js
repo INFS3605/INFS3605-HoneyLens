@@ -364,7 +364,17 @@
    *  here can go stale: the lock is released automatically the instant the
    *  callback settles (success OR throw), even if a tab crashes or is
    *  killed mid-sync. */
-  async function syncNow() {
+  /** `opts.manual` — true only when the tester explicitly pressed "Sync
+   *  now" (index.html's manualSyncNow()). Every other caller (boot,
+   *  'online' event, the periodic reconnect interval, the pre-handover
+   *  sync check) omits it and keeps the original automatic behaviour
+   *  unchanged: respects each event's backoff timer, and stops the whole
+   *  run on the first transient failure (a network blip usually affects
+   *  every request, not one — no point hammering a possibly-down
+   *  connection in the background). A manual press means "try everything
+   *  eligible right now" — see runSyncLoop(). */
+  async function syncNow(opts) {
+    const manual = !!(opts && opts.manual);
     if (!window.OOXII_CONFIG_VALID) return { ok: false, reason: 'not_configured' };
     if (!navigator.onLine) return { ok: false, reason: 'offline' };
 
@@ -374,7 +384,7 @@
           console.info('[SYNC TRACE] syncNow() could not acquire the cross-tab lock — another tab is already syncing');
           return { ok: false, reason: 'already_running_elsewhere' };
         }
-        return runSyncLoop();
+        return runSyncLoop({ manual });
       });
     }
 
@@ -386,10 +396,11 @@
     // already had before Web Locks existed.
     if (syncing) return { ok: false, reason: 'already_syncing' };
     console.info('[SYNC TRACE] syncNow() Web Locks API unavailable — using in-tab-only fallback guard');
-    return runSyncLoop();
+    return runSyncLoop({ manual });
   }
 
-  async function runSyncLoop() {
+  async function runSyncLoop(opts) {
+    const manual = !!(opts && opts.manual);
     syncing = true;
     try {
       const sessionCheck = await window.OOXII_AUTH.refreshOnlineSession();
@@ -416,8 +427,17 @@
 
       const all = await window.OOXII_DB.pendingEvents.all();
       const now = Date.now();
+      // Manual "Sync now" means "try everything eligible right now" — the
+      // tester explicitly asked, so this run ignores each event's backoff
+      // timer entirely. Automatic triggers (boot/online/periodic) keep
+      // respecting it, same as always. Either way, events are attempted in
+      // clientTimestamp order (set once, at creation time, in
+      // js/session-repository.js's persistAndQueue() — strictly increasing
+      // per device since clinical saves happen one after another) combined
+      // with blockedSessions below, so a later event for the same client
+      // is never sent ahead of an earlier one still in flight/unresolved.
       const due = all
-        .filter((e) => !e.nextRetryAt || new Date(e.nextRetryAt).getTime() <= now)
+        .filter((e) => manual || !e.nextRetryAt || new Date(e.nextRetryAt).getTime() <= now)
         .sort((a, b) => a.clientTimestamp.localeCompare(b.clientTimestamp));
 
       let pushed = 0, conflicted = 0, blockedSessions = new Set();
@@ -440,19 +460,31 @@
           console.info('[SYNC TRACE] pending event disposition: REMOVED (moved to conflicts, never retried)', { local_event_id: event.id, client_id: event.clientId, conflict_status: result.status });
           continue;
         }
-        // transient network failure — bounded backoff, keep in queue, stop
-        // this run (a network blip usually affects every request, not one)
+        // transient network failure — bounded backoff, keep in queue.
+        // Always block further events for THIS session (an unresolved
+        // transient failure means we don't yet know whether it landed, so
+        // a later event for the same client must never be sent ahead of
+        // it) — but never blocks OTHER, independent sessions from still
+        // being attempted this run. Automatic runs still stop entirely
+        // after the first transient failure (a network blip usually
+        // affects every request, not one — no point hammering a possibly-
+        // down connection in the background); a manual run keeps going,
+        // since the tester explicitly asked to try everything now and one
+        // client's problem should never silently block every other
+        // client's genuinely independent records.
         event.attempts = (event.attempts || 0) + 1;
         event.lastError = String((result.error && result.error.message) || 'network error');
         event.nextRetryAt = new Date(Date.now() + backoffDelay(event.attempts)).toISOString();
         await window.OOXII_DB.pendingEvents.put(event);
-        console.info('[SYNC TRACE] pending event disposition: RETAINED (transient failure, will retry)', { local_event_id: event.id, client_id: event.clientId, attempts: event.attempts, nextRetryAt: event.nextRetryAt });
-        break;
+        blockedSessions.add(event.clientId);
+        console.info('[SYNC TRACE] pending event disposition: RETAINED (transient failure, will retry)', { local_event_id: event.id, client_id: event.clientId, attempts: event.attempts, nextRetryAt: event.nextRetryAt, manual });
+        if (!manual) break;
       }
 
       const status = await getSyncStatus();
+      const remaining = status.pendingCount + status.retryCount;
       await updateMeta({ lastSyncAt: new Date().toISOString(), pendingCount: status.pendingCount, conflictedCount: status.conflictedCount });
-      return { ok: true, pushed, conflicted, remaining: status.pendingCount };
+      return { ok: true, pushed, conflicted, remaining };
     } finally {
       syncing = false;
     }

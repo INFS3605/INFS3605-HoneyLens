@@ -186,7 +186,25 @@
 // operational, tester-facing count. Only index.html changed. No
 // schema/migration change. Same controlled, tester-consented activation
 // as every version above.
-const CACHE_VERSION = 'v18';
+// v19: fixes manual "Sync now" doing nothing when every queued event is
+// within its automatic-retry backoff window. Root cause: runSyncLoop()'s
+// `due` filter applied the same nextRetryAt check to every trigger — the
+// tester pressing "Sync now" was silently subject to the exact same
+// bounded-exponential-backoff timer as a background retry, so if a prior
+// transient failure had just set a ~20s backoff, pressing Sync now
+// filtered those events out before pushEvent() was ever called ("2 items
+// waiting to sync" -> press Sync now -> "0 records synced", reproduced
+// live against real IndexedDB with a stubbed network layer). syncNow()/
+// runSyncLoop() now take {manual:true} (only index.html's
+// manualSyncNow() passes it) — a manual run ignores nextRetryAt entirely
+// and, on a transient failure, blocks only THAT session's later events
+// (preserving per-session order) while continuing to attempt every other
+// independent session's due events, instead of aborting the whole run on
+// the first failure like an automatic run still correctly does. No
+// change to conflict handling, ordering, or any automatic trigger. Only
+// index.html and js/sync-service.js changed. No schema/migration change.
+// Same controlled, tester-consented activation as every version above.
+const CACHE_VERSION = 'v19';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 

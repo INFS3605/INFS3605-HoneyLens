@@ -2445,11 +2445,17 @@ async function manualSyncNow(){
   toast('Syncing…','cloud');
   let r;
   try{
-    r=await window.OOXII_SYNC.syncNow();
+    // {manual:true}: try every eligible local record right now, ignoring
+    // each event's normal backoff timer — see js/sync-service.js's
+    // runSyncLoop() for exactly what this changes vs an automatic sync.
+    r=await window.OOXII_SYNC.syncNow({manual:true});
   } finally {
     manualSyncInFlight=false;
   }
-  if(r.ok){ toast(r.pushed+' record'+(r.pushed===1?'':'s')+' synced'); }
+  if(r.ok){
+    if(r.remaining>0) toast(r.remaining+' item'+(r.remaining===1?'':'s')+' still waiting to sync','warn');
+    else toast(r.pushed>0 ? (r.pushed+' record'+(r.pushed===1?'':'s')+' synced') : 'Sync complete');
+  }
   else if(r.reason==='session_expired'){ toast('Your session expired — sign in online again','warn'); }
   else if(r.reason==='already_running_elsewhere'){ toast('Sync is already running in another OOXii tab.','warn'); }
   else { toast('Could not sync — will retry automatically','warn'); }
