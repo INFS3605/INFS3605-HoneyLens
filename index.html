@@ -518,21 +518,45 @@
   .comb-new{animation:cellFill .9s ease;transform-box:fill-box;transform-origin:center}
   @keyframes cellFill{0%{opacity:.15;transform:scale(.55)}70%{opacity:1;transform:scale(1.07)}100%{opacity:1;transform:scale(1)}}
 
-  /* ===== homepage: three large primary navigation cards ===== */
-  .bignav{display:flex;flex-direction:column;gap:14px;margin-top:20px}
-  .bignav-card{display:flex;align-items:center;gap:18px;text-align:left;width:100%;
+  /* ===== homepage hierarchy: one primary action, quiet secondary/alternate rows =====
+     Mode/context (festival, station, tester identity) already lives in the
+     sidebar (see sidebar()); this block is PRIMARY WORK -> SECONDARY WORK ->
+     alternate-mode, not four competing entry points. Teal is the one
+     "primary action" colour (--ooxii-primary); secondary/alternate rows are
+     flat surfaces with no gradient, so Eye Festival Mode's importance reads
+     through hierarchy/position rather than a saturated colour, and amber
+     stays reserved for Honey (see honey-card above). */
+  .home-primary{display:flex;align-items:center;gap:18px;text-align:left;width:100%;
     background:linear-gradient(160deg,var(--teal) 0%,var(--teal-deep) 100%);
-    border:none;border-radius:20px;padding:22px;color:#fff;cursor:pointer;min-height:108px;
-    font-family:inherit;transition:transform .12s,filter .12s}
-  .bignav-card:active{transform:scale(.98);filter:brightness(1.08)}
-  .bignav-card.alt{background:linear-gradient(160deg,#6a5fd0,#4a4fb0)}
-  .bignav-card.fest{background:linear-gradient(160deg,#cf8f2e,#96621e)}
-  .bignav-card.indiv{background:linear-gradient(160deg,#27a98a,#177a62)}
-  .bignav-card[aria-disabled="true"]{opacity:.55;filter:grayscale(.3)}
-  .bignav-card .bn-ic{width:64px;height:64px;border-radius:18px;background:rgba(255,255,255,.16);
+    border:none;border-radius:var(--ooxii-radius-lg);padding:22px;color:#fff;cursor:pointer;min-height:104px;
+    font-family:inherit;transition:transform .12s,filter .12s;margin-top:18px}
+  .home-primary:active{transform:scale(.98);filter:brightness(1.08)}
+  .home-primary .bn-ic{width:60px;height:60px;border-radius:var(--ooxii-radius-md);background:rgba(255,255,255,.16);
     display:flex;align-items:center;justify-content:center;flex:0 0 auto}
-  .bignav-card .bn-t{font-size:21px;font-weight:800}
-  .bignav-card .bn-s{font-size:14px;opacity:.94;margin-top:4px}
+  .home-primary .bn-t{font-size:20px;font-weight:800}
+  .home-primary .bn-s{font-size:13.5px;opacity:.94;margin-top:4px}
+
+  .home-secondary-label{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;
+    color:var(--dimmer);margin:22px 0 10px}
+  .home-row{display:flex;flex-direction:column;gap:10px}
+  .home-row-card{display:flex;align-items:center;gap:14px;text-align:left;width:100%;
+    background:var(--surface);border:1px solid var(--border-2);border-radius:var(--ooxii-radius-md);
+    padding:14px 16px;color:#fff;cursor:pointer;min-height:64px;font-family:inherit;
+    transition:background .12s}
+  .home-row-card:active{background:var(--surface-2)}
+  .home-row-card .rn-ic{width:38px;height:38px;border-radius:var(--ooxii-radius-sm);
+    background:rgba(28,195,214,.14);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .home-row-card .rn-t{font-size:15px;font-weight:700}
+  .home-row-card .rn-s{font-size:12.5px;color:var(--dim);margin-top:1px}
+  .home-alt{display:flex;align-items:center;gap:12px;text-align:left;width:100%;
+    background:none;border:1px dashed var(--border-2);border-radius:var(--ooxii-radius-md);
+    padding:12px 16px;color:var(--dim);cursor:pointer;font-family:inherit;margin-top:10px;
+    transition:border-color .12s,color .12s}
+  .home-alt:active{border-color:var(--border);color:var(--text)}
+  .home-alt .rn-ic{width:32px;height:32px;border-radius:50%;background:var(--surface);
+    display:flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .home-alt .rn-t{font-size:13.5px;font-weight:700;color:var(--text)}
+  .home-alt .rn-s{font-size:12px;color:var(--dimmer)}
 
   /* ===== station selection cards (Eye Festival Mode) ===== */
   .station-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:18px}
@@ -1909,46 +1933,69 @@ function assertNotAccidentalDemo(){
   }
   return true;
 }
+/* Home's PRIMARY WORK slot is always exactly one action, chosen from the
+   SAME state this screen already read for the old four-tile layout
+   (getActiveTesterStation()/isIndividualMode()) — no new routing or mode
+   logic, just which single existing action is most relevant right now:
+     - individual mode           -> continue individual testing
+     - at the Registration station -> New Client (the actual task there)
+     - at any other station      -> open that station's workspace
+     - no mode/station chosen yet -> Eye Festival Mode is the primary
+       action (choosing a station IS the relevant next step), not a
+       fourth tile competing with Search/Individual Testing.
+   All four onclick targets (homeNewClient, pickStation, enterIndividualMode,
+   go(ScreenFestival)/go(ScreenSearchClient)) are pre-existing and unchanged. */
+function homePrimaryAction(st, indiv){
+  if(indiv) return {icon:'person', title:'Continue individual testing',
+    sub:'Pick up where you left off — every step, in order', onclick:'enterIndividualMode()'};
+  if(st==='Registration') return {icon:'clipboard', title:'New Client',
+    sub:'Register a new anonymous client', onclick:'homeNewClient()'};
+  if(st){
+    const ready=getClientsForActiveStation().length;
+    return {icon:stationIcon(st), title:'Continue at '+stationLabel(st)+' station',
+      sub: ready ? `${ready} client${ready===1?'':'s'} ready for you` : 'Open your station workspace',
+      onclick:`pickStation('${st}')`};
+  }
+  return {icon:'eye', title:'Eye Festival Mode',
+    sub:'Choose your station to get started', onclick:'go(ScreenFestival)'};
+}
 function ScreenHome(){
   if(!assertNotAccidentalDemo()) return;
   const t=state.tester;
   const st=getActiveTesterStation();
   const indiv=isIndividualMode();
-  const regOK = indiv || st==='Registration';
+  const p=homePrimaryAction(st, indiv);
+  const contextLine = indiv ? 'Individual testing'+(t.camp?' · '+t.camp:'')
+    : st ? stationLabel(st)+' station'+(t.camp?' · '+t.camp:'')
+    : (t.camp||'');
   screenEl().innerHTML = `<div class="tl-wrap">
     ${sidebar()}
     <main class="tl-main">
       ${navBar('home')}
       <div style="margin-bottom:4px">
         <div style="font-size:24px;font-weight:800">Welcome, ${t.name}</div>
-        <div style="color:var(--dim);font-size:14px;margin-top:3px">${t.camp}</div>
+        ${contextLine?`<div style="color:var(--dim);font-size:14px;margin-top:3px">${contextLine}</div>`:''}
       </div>
-      <div class="bignav">
-        <button class="bignav-card" ${regOK?'':'aria-disabled="true"'} onclick="homeNewClient()">
-          <div class="bn-ic">${I('clipboard',34)}</div>
-          <div><div class="bn-t">New Client</div>
-          <div class="bn-s">${regOK?'Register a new anonymous client':'Done at the Registration station'}</div></div>
-          <span class="chev" style="margin-left:auto">${I('chevR',26,'#fff')}</span>
-        </button>
-        <button class="bignav-card alt" onclick="go(ScreenSearchClient)">
-          <div class="bn-ic">${I('search',34)}</div>
-          <div><div class="bn-t">Search Client</div>
-          <div class="bn-s">Find a client by anonymous ID</div></div>
-          <span class="chev" style="margin-left:auto">${I('chevR',26,'#fff')}</span>
-        </button>
-        <button class="bignav-card fest" onclick="go(ScreenFestival)">
-          <div class="bn-ic">${I('eye',34)}</div>
-          <div><div class="bn-t">Eye Festival Mode</div>
-          <div class="bn-s">${!indiv&&st?'Continue at your '+stationLabel(st)+' station':'Work at one station with other testers'}</div></div>
-          <span class="chev" style="margin-left:auto">${I('chevR',26,'#fff')}</span>
-        </button>
-        <button class="bignav-card indiv" onclick="enterIndividualMode()">
-          <div class="bn-ic">${I('person',34)}</div>
-          <div><div class="bn-t">Individual Testing</div>
-          <div class="bn-s">${indiv?'Continue — you are in individual mode':'One tester does every step, in order'}</div></div>
-          <span class="chev" style="margin-left:auto">${I('chevR',26,'#fff')}</span>
+      <button class="home-primary" onclick="${p.onclick}">
+        <div class="bn-ic">${I(p.icon,32)}</div>
+        <div><div class="bn-t">${p.title}</div>
+        <div class="bn-s">${p.sub}</div></div>
+        <span class="chev" style="margin-left:auto">${I('chevR',24,'#fff')}</span>
+      </button>
+      <div class="home-secondary-label">Also available</div>
+      <div class="home-row">
+        <button class="home-row-card" onclick="go(ScreenSearchClient)">
+          <div class="rn-ic">${I('search',19,'#1cc3d6')}</div>
+          <div><div class="rn-t">Search Client</div>
+          <div class="rn-s">Find a client by anonymous ID</div></div>
+          <span class="chev" style="margin-left:auto">${I('chevR',18,'#7c83b4')}</span>
         </button>
       </div>
+      ${indiv?'':`<button class="home-alt" onclick="enterIndividualMode()">
+        <div class="rn-ic">${I('person',16,'#a7add9')}</div>
+        <div><div class="rn-t">Individual Testing</div>
+        <div class="rn-s">Alternative mode — one tester does every step alone</div></div>
+      </button>`}
       ${privacy()}
     </main>
   </div>`;

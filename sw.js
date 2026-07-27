@@ -252,7 +252,21 @@
 // of a hardcoded literal — no visual change expected from this version
 // bump alone. No change to any clinical, sync, QR, Honey-award, or auth
 // logic; presentation-only, same as v20/v21 above.
-const CACHE_VERSION = 'v22';
+// v23 — Design-system Phase 2B: Home screen hierarchy refinement
+// (index.html only). Replaced the four equal-weight gradient nav tiles
+// with one context-aware PRIMARY WORK card (New Client at Registration /
+// "Continue at <Station> station" with a live ready-count elsewhere /
+// "Continue individual testing" / Eye Festival Mode's station picker when
+// no station is chosen yet), a quiet SECONDARY WORK row (Search Client),
+// and Individual Testing demoted to a clearly-alternate dashed row (hidden
+// entirely once already in individual mode, since the sidebar already
+// covers switching back to festival stations). Every onclick target
+// (homeNewClient(), pickStation(), enterIndividualMode(), go(ScreenFestival)
+// /go(ScreenSearchClient)) is pre-existing and unchanged — this reuses the
+// exact station/mode state ScreenHome already read before, it just decides
+// which single existing action to foreground. No routing, mode, station-
+// gating, clinical, sync, QR, Honey-award, or auth logic touched.
+const CACHE_VERSION = 'v23';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
