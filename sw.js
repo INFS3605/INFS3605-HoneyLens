@@ -204,7 +204,29 @@
 // change to conflict handling, ordering, or any automatic trigger. Only
 // index.html and js/sync-service.js changed. No schema/migration change.
 // Same controlled, tester-consented activation as every version above.
-const CACHE_VERSION = 'v19';
+// v20: adds visible reward feedback for every normal (non-milestone)
+// Honey award. Root cause of the missing bee: honeyAfterSave() only
+// ever called toast('+1 ...') for a plain reward (no bee/drop animation
+// at all — that visual language existed ONLY inside showHoneyMilestone(),
+// gated behind badgeUp), and even that toast was deferred until the
+// handover QR's "Done" callback fired, not the moment the station was
+// actually completed. New showHoneyPop() fires synchronously inside
+// awardStationHoney() — the same place the reward itself is granted, on
+// the same `awarded` boolean, so it can never fire for a restored/
+// already-rewarded/reopened/corrected/resynced item — BEFORE
+// finishStationTask() goes on to open the handover QR. It reuses the
+// existing bee/honey-drop SVGs from showHoneyMilestone but is a
+// separate, non-scrim overlay (no backdrop, nothing to dismiss,
+// pointer-events:none, z-index above .scrim) so it renders on top of a
+// QR opening moments later instead of being destroyed by scrim()'s own
+// closeScrim() call, and survives screen navigation (attached to #phone,
+// not #screen). Auto-removes itself after ~2.1s. showHoneyMilestone()
+// itself is completely unchanged — still its own blocking celebration
+// for actual daily-badge crossings. Only index.html changed. No
+// schema/migration change, no change to the station-reward accounting
+// logic itself. Same controlled, tester-consented activation as every
+// version above.
+const CACHE_VERSION = 'v20';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
