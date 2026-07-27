@@ -25,17 +25,25 @@
 <script src="../js/config.js" onerror="console.warn('[OOXii Admin] js/config.js not found — copy js/config.example.js and fill in your Supabase project values.')"></script>
 <script src="../js/supabase-client.js"></script>
 
+<!-- Shared OOXii design tokens (css/ooxii-design-system.css) — same file
+     the tester app loads. See that file's header comment. This portal has
+     no service worker (coordinator-only, online-only by design), so it
+     uses the same ?v= cache-busting convention as admin/js/*.js below. -->
+<link rel="stylesheet" href="../css/ooxii-design-system.css?v=1">
 <style>
   :root{
-    --bg-0:#0c0e24; --bg-1:#12153a; --bg-2:#171a47;
-    --surface:rgba(118,128,205,.10); --surface-2:rgba(120,131,210,.16);
-    --border:rgba(154,164,228,.14); --border-2:rgba(154,164,228,.24);
-    --teal:#14a8c5; --teal-2:#1cc3d6; --teal-deep:#0e83a0;
-    --text:#ffffff; --dim:#a7add9; --dimmer:#7c83b4;
-    --green:#4ade80; --green-bg:rgba(74,222,128,.12);
-    --blue:#4d8bf5; --amber:#f5b945; --amber-bg:rgba(245,185,69,.12);
-    --red:#f06a7a; --red-bg:rgba(240,106,122,.12);
-    --paddle:#7d56c9;
+    /* Surface ladder stays admin-specific: this portal has no raised
+       device frame — its own bg-0 IS the shared canvas colour, one flat
+       page. See css/ooxii-design-system.css's header comment. */
+    --bg-0:var(--ooxii-canvas); --bg-1:#12153a; --bg-2:#171a47;
+    --surface:rgba(var(--ooxii-surface-rgb),.10); --surface-2:rgba(var(--ooxii-surface-rgb),.16);
+    --border:rgba(var(--ooxii-border-rgb),.14); --border-2:rgba(var(--ooxii-border-rgb),.24);
+    --teal:var(--ooxii-primary); --teal-2:var(--ooxii-primary-2); --teal-deep:var(--ooxii-primary-deep);
+    --text:var(--ooxii-text); --dim:var(--ooxii-text-dim); --dimmer:var(--ooxii-text-dimmer);
+    --green:var(--ooxii-success); --green-bg:var(--ooxii-success-bg);
+    --blue:var(--ooxii-info); --amber:var(--ooxii-honey); --amber-bg:var(--ooxii-honey-bg);
+    --red:var(--ooxii-danger); --red-bg:var(--ooxii-danger-bg);
+    --paddle:var(--ooxii-plum);
     --r:14px;
     font-synthesis:none;
   }

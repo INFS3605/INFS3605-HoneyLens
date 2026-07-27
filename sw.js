@@ -240,19 +240,33 @@
 // and the pop's internal layout markup changed, not when or why it
 // fires. No change to award/dedup logic, QR payload, handover locking,
 // clinical routing, sync, or Supabase.
-const CACHE_VERSION = 'v21';
+// v22 — Design-system Phase 2A: added css/ooxii-design-system.css, a new
+// same-origin stylesheet of shared OOXii tokens (colour, radius, spacing,
+// type-scale, shadow) now linked from index.html's <head>-equivalent
+// section and consumed via var() aliases inside index.html's own :root
+// block. It is a new CORE_ASSET (see above) so it precaches and works
+// offline exactly like the existing js/*.js entries — a browser already
+// on v21 would otherwise 404 on it forever. Purely additive: every
+// existing --teal/--amber/--green/etc. custom property still resolves to
+// the exact same colour it did before, just via the shared file instead
+// of a hardcoded literal — no visual change expected from this version
+// bump alone. No change to any clinical, sync, QR, Honey-award, or auth
+// logic; presentation-only, same as v20/v21 above.
+const CACHE_VERSION = 'v22';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
 // Mandatory — install fails (visibly, in both the SW lifecycle and the
 // console) if any of these can't be fetched. Every locally-hosted script
-// index.html loads, plus the two vendored QR libraries. There is no
-// separate CSS file (all styling is inline in index.html) and no local
-// fonts/icons (icons are inline SVG generated in JS) — confirmed against
-// every <script src="..."> in index.html pointing same-origin.
+// index.html loads, plus the two vendored QR libraries, plus the shared
+// OOXii design-tokens stylesheet (css/ooxii-design-system.css) added
+// alongside the rest of index.html's own inline styling — same
+// same-origin, same precache-then-cache-first treatment as everything
+// else here. No local fonts/icons (icons are inline SVG generated in JS).
 const CORE_ASSETS = [
   '/',
   '/index.html',
+  '/css/ooxii-design-system.css',
   '/js/config.example.js',
   '/js/supabase-client.js',
   '/js/indexed-db.js',

@@ -44,17 +44,25 @@
      first successful online load. Safe no-op on file:// or unsupported
      browsers; the app already works without it. -->
 <script src="js/sw-register.js"></script>
+<!-- Shared OOXii design tokens (css/ooxii-design-system.css) — see that
+     file's header comment. Precached offline via sw.js CORE_ASSETS, same
+     as the local <script src> files above. -->
+<link rel="stylesheet" href="css/ooxii-design-system.css">
 <style>
   :root{
+    /* Surface ladder stays tester-specific: content renders inside a
+       raised device frame (#phone) on top of --ooxii-canvas, so this
+       app's own bg-0/1/2 start one step lighter than the shared canvas
+       colour — see css/ooxii-design-system.css's header comment. */
     --bg-0:#15183c; --bg-1:#1e2157; --bg-2:#262a66;
-    --surface:rgba(118,128,205,.12); --surface-2:rgba(120,131,210,.20);
-    --border:rgba(154,164,228,.16); --border-2:rgba(154,164,228,.28);
-    --teal:#14a8c5; --teal-2:#1cc3d6; --teal-deep:#0e83a0;
-    --text:#ffffff; --dim:#a7add9; --dimmer:#7c83b4;
-    --green:#4ade80; --green-bg:rgba(74,222,128,.12);
-    --blue:#4d8bf5; --amber:#f5b945; --red:#f06a7a;
-    --chip:rgba(96,104,190,.42); --paddle:#7d56c9;
-    --shadow:0 14px 40px rgba(0,0,0,.45);
+    --surface:rgba(var(--ooxii-surface-rgb),.12); --surface-2:rgba(var(--ooxii-surface-rgb),.20);
+    --border:rgba(var(--ooxii-border-rgb),.16); --border-2:rgba(var(--ooxii-border-rgb),.28);
+    --teal:var(--ooxii-primary); --teal-2:var(--ooxii-primary-2); --teal-deep:var(--ooxii-primary-deep);
+    --text:var(--ooxii-text); --dim:var(--ooxii-text-dim); --dimmer:var(--ooxii-text-dimmer);
+    --green:var(--ooxii-success); --green-bg:var(--ooxii-success-bg);
+    --blue:var(--ooxii-info); --amber:var(--ooxii-honey); --red:var(--ooxii-danger);
+    --chip:rgba(96,104,190,.42); --paddle:var(--ooxii-plum);
+    --shadow:var(--ooxii-shadow-card);
     --r:16px;
     font-synthesis:none;
   }
@@ -62,7 +70,7 @@
   html,body{margin:0;height:100%}
   body{
     font-family:'Segoe UI',system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
-    background:#0c0e24; color:var(--text);
+    background:var(--ooxii-canvas); color:var(--text);
     display:flex; align-items:center; justify-content:center; min-height:100vh; padding:18px;
   }
   /* tablet frame — landscape tablet first (see redesign notes) */

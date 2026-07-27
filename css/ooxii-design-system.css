@@ -1,0 +1,88 @@
+/*
+  OOXii shared design tokens — consumed by both index.html (tester app) and
+  admin/index.html (Insights Portal).
+
+  Rationalisation only, not a repaint: every value below already existed,
+  identically or near-identically, in one or both files' own :root block
+  before this file existed (teal/amber/green/blue/red/paddle hex codes,
+  the 10/14/20/999px radii, the #0c0e24 canvas colour, etc.). This file
+  gives those values one shared name; it does not introduce a new palette.
+
+  Scope of this file: tokens only (custom properties). No selectors, no
+  component rules — each app keeps its own layout and component CSS, per
+  the design direction ("share a design language, not identical layouts").
+
+  Loaded as a real stylesheet (not duplicated inline) because both apps are
+  already same-origin, already load several local <script src> files the
+  same way, and the tester app's service worker (sw.js) already precaches
+  every local asset it depends on — this file is added to sw.js's
+  CORE_ASSETS exactly like the existing js/*.js entries, so it works
+  offline the same way they do. admin/index.html has no service worker (it
+  is coordinator-only and online-only by design) and loads this with the
+  same ?v= cache-busting convention it already uses for admin/js/*.js.
+*/
+
+:root{
+  /* ---- brand: teal stays the one primary/action colour ---- */
+  --ooxii-primary:#14a8c5;
+  --ooxii-primary-2:#1cc3d6;
+  --ooxii-primary-deep:#0e83a0;
+
+  /* ---- brand: amber stays reserved for Honey/rewards, not general accent ---- */
+  --ooxii-honey:#f5b945;
+  --ooxii-honey-bg:rgba(245,185,69,.12);
+
+  /* ---- secondary brand accent (Paddle station, avatar gradients) ---- */
+  --ooxii-plum:#7d56c9;
+
+  /* ---- status colours (existing values, now shared) ---- */
+  --ooxii-success:#4ade80;
+  --ooxii-success-bg:rgba(74,222,128,.12);
+  --ooxii-info:#4d8bf5;
+  --ooxii-danger:#f06a7a;
+  --ooxii-danger-bg:rgba(240,106,122,.12);
+
+  /* ---- text ---- */
+  --ooxii-text:#ffffff;
+  --ooxii-text-dim:#a7add9;
+  --ooxii-text-dimmer:#7c83b4;
+
+  /* ---- shared page canvas (identical value in both apps already) ---- */
+  --ooxii-canvas:#0c0e24;
+
+  /* ---- shared hue for surfaces/borders — each app still picks its own
+     alpha/elevation tier from this hue, because the tester app renders
+     inside a raised device frame and the admin portal does not; forcing
+     one literal surface colour would flatten that intentional difference. ---- */
+  --ooxii-surface-rgb:119,130,207;
+  --ooxii-border-rgb:154,164,228;
+
+  /* ---- radius scale — the three sizes both apps already reach for most ---- */
+  --ooxii-radius-sm:10px;
+  --ooxii-radius-md:14px;
+  --ooxii-radius-lg:20px;
+  --ooxii-radius-pill:999px;
+
+  /* ---- spacing scale (light touch — existing layouts are already close
+     to this rhythm; available for components that adopt it in later
+     phases, not force-applied by this file) ---- */
+  --ooxii-space-1:4px;
+  --ooxii-space-2:8px;
+  --ooxii-space-3:12px;
+  --ooxii-space-4:16px;
+  --ooxii-space-5:24px;
+  --ooxii-space-6:32px;
+
+  /* ---- type scale (defined here as shared values; applied to actual
+     h1/h2/h3 selectors in the phase that touches each surface, not by
+     this token-only file) ---- */
+  --ooxii-h1:26px;
+  --ooxii-h2:20px;
+  --ooxii-h3:16px;
+
+  /* ---- elevation ---- */
+  --ooxii-shadow-card:0 14px 40px rgba(0,0,0,.45);
+
+  /* ---- field-usability floor — do not go below this for tappable controls ---- */
+  --ooxii-touch-min:44px;
+}
