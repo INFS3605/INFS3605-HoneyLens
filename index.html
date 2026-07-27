@@ -1355,15 +1355,29 @@ function refreshSyncStatusCache(){
   if(!window.OOXII_SYNC || !window.OOXII_CONFIG_VALID || isDemoModeSession()) return;
   window.OOXII_SYNC.getSyncStatus().then((s)=>{ cachedSyncStatus=s; updateSyncPills(); }).catch(()=>{});
 }
+/* Tester-facing sync language is deliberately simple — no "conflict",
+   "retry", "failed", "version mismatch" or any other technical term ever
+   reaches this UI. Every locally-queued item that hasn't safely reached
+   Supabase (pending, retry-needed, OR an unresolved conflict) is folded
+   into one plain count: "waiting to sync". The underlying buckets
+   (pendingCount/retryCount/conflictedCount from getSyncStatus() in
+   js/sync-service.js) are completely unchanged — conflict detection,
+   retry/backoff, and server-snapshot reconciliation all still work
+   exactly as before; only what's DISPLAYED is collapsed. A coordinator
+   reviewing sync_conflicts directly in Supabase (or a future admin-portal
+   view) still sees the real technical picture — this simplification is
+   tester-UI-only. */
+function waitingToSyncCount(s){ return s ? (s.pendingCount + s.retryCount + s.conflictedCount) : 0; }
 function syncPillContent(){
   if(!window.OOXII_CONFIG_VALID || isDemoModeSession()){
-    return { label: state.sync.length ? state.sync.length+' queued' : 'Sync', cls: 'sy-offline' };
+    return { label: state.sync.length ? state.sync.length+' waiting to sync' : 'Sync', cls: 'sy-offline' };
   }
   const s = cachedSyncStatus;
   if(!s) return { label: 'Sync', cls: 'sy-offline' };
-  if(s.conflictedCount>0) return { label: s.conflictedCount+' conflict'+(s.conflictedCount===1?'':'s'), cls: 'sy-error' };
+  const waiting = waitingToSyncCount(s);
+  if(!navigator.onLine && waiting>0) return { label: 'Offline · '+waiting+' saved', cls: 'sy-offline' };
   if(s.syncingCount>0) return { label: 'Syncing…', cls: 'sy-pending' };
-  if(s.pendingCount>0 || s.retryCount>0) return { label: (s.pendingCount+s.retryCount)+' pending', cls: 'sy-pending' };
+  if(waiting>0) return { label: waiting+' item'+(waiting===1?'':'s')+' waiting to sync', cls: 'sy-pending' };
   return { label: 'Synced', cls: 'sy-synced' };
 }
 function syncStatusPill(){
@@ -2362,38 +2376,46 @@ function ScreenSync(){
   if(!window.OOXII_CONFIG_VALID || isDemoModeSession()) return ScreenSyncDemo();
   screenEl().innerHTML=`<div class="pad pb">
     ${navBar('home')}
-    <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync queue</h1><p>Checking pending records…</p></div></div>
+    <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync</h1><p>Checking…</p></div></div>
   </div>`;
   window.OOXII_SYNC.getSyncStatus().then((s)=>{ cachedSyncStatus=s; updateSyncPills(); renderSyncStatus(s); });
 }
-/* Each row is a DISJOINT bucket — every locally queued event falls into
-   exactly one, never more than one (see getSyncStatus() in
-   js/sync-service.js for the exact definitions). Previously "Pending"
-   double-counted every retry-needed event (it was pendingEvents.length,
-   which already included them), so a single stuck event could show as
-   both "Pending: 1" and "Failed (retrying): 1" at once. */
+/* One plain summary, not a technical breakdown — see waitingToSyncCount()'s
+   comment for why pending/retry/conflict are folded together here. The
+   underlying counts are still fetched and still drive this screen's
+   logic (nothing about detection/retry/reconciliation changes); a
+   coordinator who needs the real technical picture reviews sync_conflicts
+   directly in Supabase, not through this screen. */
 function renderSyncStatus(status){
-  const rows=[
-    ['Pending', status.pendingCount, 's-waiting', '#f5b945'],
-    ['Syncing now', status.syncingCount, 's-ready', '#1cc3d6'],
-    ['Retry needed', status.retryCount, 's-error', '#f06a7a'],
-    ['Conflicts needing review', status.conflictedCount, 's-blocked', '#f06a7a'],
-  ];
+  const waiting = waitingToSyncCount(status);
+  const offline = !navigator.onLine;
+  const syncing = status.syncingCount>0;
+  let headline, sub;
+  if(syncing){
+    headline='Syncing…';
+    sub='Sending your saved records now.';
+  } else if(offline && waiting>0){
+    headline='Offline · '+waiting+' saved';
+    sub="Your data is safely stored on this device and will sync automatically when a connection is available.";
+  } else if(waiting>0){
+    headline=waiting+' item'+(waiting===1?'':'s')+' waiting to sync';
+    sub="Your data is safely stored on this device and will sync automatically when a connection is available.";
+  } else {
+    headline='Synced';
+    sub='Everything from this device has reached the server.';
+  }
   screenEl().innerHTML=`<div class="pad pb">
     ${navBar('home')}
-    <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync queue</h1>
+    <div class="camp"><div class="camp-ic">${I('cloudup',26)}</div><div><h1>Sync</h1>
       <p>${status.lastSyncAt?('Last synced '+new Date(status.lastSyncAt).toLocaleTimeString()):'Not synced yet on this device'}</p></div></div>
-    ${!navigator.onLine?`<div class="notice warn" style="margin-top:20px"><span class="x">${I('warn',22,'#f5b945')}</span><div><div class="t">Offline</div><div class="s">Records stay safe on this device and upload automatically once you're back online. Testing is never interrupted.</div></div></div>`:''}
-    ${status.blocked?`<div class="notice" style="margin-top:14px"><span class="x">${I('warn',22,'#f06a7a')}</span><div><div class="t">Sync paused</div><div class="s">${status.blockedReason}</div></div></div>`:''}
-    <div class="card sumcard" style="margin-top:14px">
-      ${rows.map(([label,n,cls,dot])=>`<div class="sumrow"><div class="txt"><div class="a">${label}</div></div>
-        <div class="val"><span class="statpill ${cls}"><span class="dot" style="background:${dot}"></span>${n}</span></div></div>`).join('')}
+    <div class="card sumcard" style="margin-top:14px;padding:24px;text-align:center">
+      <div style="font-size:20px;font-weight:800">${headline}</div>
+      <div class="hint" style="margin-top:8px">${sub}</div>
     </div>
-    ${status.conflictedCount?`<div class="hint">Conflicts are never auto-resolved — a coordinator reviews them in Supabase (sync_conflicts table).</div>`:''}
+    ${status.blocked?`<div class="notice" style="margin-top:14px"><span class="x">${I('warn',22,'#f06a7a')}</span><div><div class="t">Sync paused</div><div class="s">${status.blockedReason}</div></div></div>`:''}
     ${(()=>{
-      const hasWork = status.pendingCount>0 || status.retryCount>0;
-      const disabled = !navigator.onLine || !hasWork || status.syncingCount>0;
-      const label = status.syncingCount>0 ? 'Syncing…' : (!navigator.onLine ? 'Offline — cannot sync now' : (!hasWork ? 'Nothing to sync' : 'Sync now'));
+      const disabled = offline || waiting===0 || syncing;
+      const label = syncing ? 'Syncing…' : (offline ? 'Offline — cannot sync now' : (waiting===0 ? 'Nothing to sync' : 'Sync now'));
       return `<button class="btn btn-primary" style="margin-top:14px" ${disabled?'disabled':''} onclick="manualSyncNow()">${I('cloud',22)} ${label}</button>`;
     })()}
     ${privacy()}

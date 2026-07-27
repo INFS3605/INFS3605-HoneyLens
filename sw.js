@@ -160,7 +160,19 @@
 // something this file can do; the tester app keeps working correctly
 // offline/locally either way, per the existing local-first design. Same
 // controlled, tester-consented activation as every version above.
-const CACHE_VERSION = 'v16';
+//
+// v17: simplifies the tester-facing sync pill and Sync screen — no more
+// raw "conflict"/"retry needed"/"pending" breakdown. Every locally-queued
+// item that hasn't safely reached Supabase (pending, retry-needed, OR an
+// unresolved conflict — see waitingToSyncCount()) is now shown as one
+// plain count: "N items waiting to sync", "Syncing…", "Offline · N
+// saved", or "Synced". getSyncStatus() in js/sync-service.js, conflict
+// detection, retry/backoff, and server-snapshot reconciliation are all
+// completely unchanged — this is a rendering-only simplification;
+// sync_conflicts and the real technical picture remain fully intact and
+// reviewable directly in Supabase. Same controlled, tester-consented
+// activation as every version above.
+const CACHE_VERSION = 'v17';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
