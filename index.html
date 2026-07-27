@@ -192,9 +192,13 @@
   .savebanner .t{font-weight:700;font-size:16px}
   .savebanner .s{color:var(--dim);font-size:13px;margin-top:2px}
 
-  /* form rows */
-  .frow{display:flex;align-items:center;gap:13px;background:var(--surface);border:1px solid var(--border);
-    border-radius:14px;padding:13px 14px;margin-bottom:11px;min-height:64px}
+  /* form rows — one continuous list separated by a hairline divider rather
+     than each field being its own bordered/backgrounded card ("stack of
+     cards"); the icon chip, label, required-mark, and min-height touch
+     target are unchanged, so separation between questions and quick
+     visual scanning stay exactly as clear as before, just quieter. */
+  .frow{display:flex;align-items:center;gap:13px;
+    border-bottom:1px solid var(--border);padding:14px 4px;min-height:64px}
   .frow .fic{width:44px;height:44px;border-radius:12px;background:var(--chip);display:flex;
     align-items:center;justify-content:center;flex:0 0 auto;font-weight:800}
   .frow .flabel{flex:1;min-width:0}
@@ -231,7 +235,9 @@
     border-radius:11px;padding:11px 13px;font-weight:800;font-size:15px;text-align:center;min-width:96px}
 
   /* stacked vision-test field (roomy, touch-friendly, language-light) */
-  .vfield{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px;margin-bottom:11px}
+  /* one focused vision-test question per block — subtle tinted surface,
+     no outlined border, separated by spacing rather than a card outline */
+  .vfield{background:var(--surface);border-radius:var(--ooxii-radius-md);padding:14px;margin-bottom:14px}
   .vhead{display:flex;align-items:center;gap:12px;margin-bottom:13px}
   .vhead .fic{width:44px;height:44px;border-radius:12px;background:var(--chip);display:flex;align-items:center;justify-content:center;flex:0 0 auto}
   .vhead .l{font-weight:700;font-size:16.5px;flex:1;line-height:1.25}

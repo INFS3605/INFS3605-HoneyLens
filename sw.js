@@ -266,7 +266,22 @@
 // exact station/mode state ScreenHome already read before, it just decides
 // which single existing action to foreground. No routing, mode, station-
 // gating, clinical, sync, QR, Honey-award, or auth logic touched.
-const CACHE_VERSION = 'v23';
+// v24 — Design-system Phase 2C: clinical field-row visual refinement
+// (index.html only). .frow (used by fieldSelect/fieldSeg/fieldNumber/
+// roFieldSelect/roFieldSeg — Intake, Distance, Near, Wheel, Paddle,
+// Dispense, Search, Festival, Exit) no longer renders each field as its
+// own bordered/backgrounded/rounded card; it's now one continuous list
+// separated by a hairline divider, same icon chip, label, required-mark,
+// and min-height:64px touch target as before. .vfield (the stacked
+// vision-test question block used by fieldEyeLine/fieldLetters on
+// Distance/Near/Wheel/Paddle) keeps its tinted surface but drops the
+// outlined border. markFieldInvalid()'s red-outline/message behaviour is
+// untouched (it targets the control and appends a message node, not the
+// row's own border) — verified live by leaving required Intake fields
+// blank. No change to any clinical decision logic, validation rules,
+// required-field enforcement, blank-dropdown defaults, station routing,
+// QR handover, sync, Honey rewards, or auth.
+const CACHE_VERSION = 'v24';
 const CACHE_NAME = `ooxii-app-shell-${CACHE_VERSION}`;
 const CACHE_PREFIX = 'ooxii-app-shell-';
 
