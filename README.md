@@ -33,11 +33,16 @@ Open **http://localhost:8000** in a browser. You'll see a "Configuration
 needed" screen (there's no `js/config.js` yet, which is normal and expected —
 see [Running the Application](#running-the-application)) — click
 **"Continue in demo mode (no backend)"**, then sign in with any
-email/password (demo mode doesn't check them). You're now in the full tester
-app with sample clients, able to walk the entire Registration → Distance →
-Wheel/Paddle → Dispense workflow, try Eye Festival Mode and Individual
-Testing Mode, and see the Honey reward animation — all running locally, all
-in memory/IndexedDB, nothing leaves your machine.
+email/password — demo mode doesn't check them, for example:
+
+- **Email:** `johnsmith@gmail.com`
+- **Password:** `testing123`
+
+You're now in the full tester app with sample clients, able to walk the
+entire Registration → Distance → Wheel/Paddle → Dispense workflow, try Eye
+Festival Mode and Individual Testing Mode, and see the Honey reward
+animation — all running locally, all in memory/IndexedDB, nothing leaves
+your machine.
 
 The **Insights Portal** (`http://localhost:8000/admin/`) has no demo mode —
 it requires a real, configured Supabase project (see
@@ -162,9 +167,11 @@ workers and camera access don't function over `file://`.
 ### 2. Tester app — with or without a backend
 - **No backend configured (default on a fresh clone):** the app detects that
   `js/config.js` doesn't exist and shows a "Configuration needed" screen with
-  a **"Continue in demo mode"** button. Demo mode runs entirely in memory
-  with sample clients — nothing syncs anywhere, and no Supabase project is
-  needed.
+  a **"Continue in demo mode"** button. On the sign-in screen that follows,
+  any email/password is accepted (nothing is checked against a real
+  account) — e.g. `johnsmith@gmail.com` / `testing123`. Demo mode runs
+  entirely in memory with sample clients — nothing syncs anywhere, and no
+  Supabase project is needed.
 - **With a real backend:** copy `js/config.example.js` to `js/config.js` and
   fill in your Supabase project URL and publishable key (see
   [Deployment](#deployment) / `SUPABASE_SETUP.md` for the full walkthrough,
