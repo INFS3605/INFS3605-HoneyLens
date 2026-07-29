@@ -49,6 +49,10 @@ it requires a real, configured Supabase project (see
 [Deployment](#deployment) and `SUPABASE_SETUP.md`). Opening it without one
 shows a clear "Not configured" screen rather than an error.
 
+OR 
+
+See app through netlify: https://splendid-gecko-4ccfb1.netlify.app/ 
+
 ---
 
 ## Features
